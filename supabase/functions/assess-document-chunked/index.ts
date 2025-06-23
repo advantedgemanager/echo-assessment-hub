@@ -1,4 +1,3 @@
-
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -36,6 +35,56 @@ serve(async (req) => {
       throw new Error('MISTRAL_API_KEY environment variable is not set');
     }
 
+    // Get document
+    const { data: document, error: docError } = await supabaseClient
+      .from('uploaded_documents')
+      .select('*')
+      .eq('id', documentId)
+      .eq('user_id', userId)
+      .single();
+
+    if (docError || !document) {
+      throw new Error('Document not found or not accessible');
+    }
+
+    // If document text is not available, process it first
+    if (!document.document_text) {
+      console.log('Document text not available, processing document first...');
+      
+      try {
+        const { data: processResult, error: processError } = await supabaseClient.functions.invoke('document-processor', {
+          body: { documentId, userId }
+        });
+
+        if (processError) {
+          throw new Error(`Failed to process document: ${processError.message}`);
+        }
+
+        if (!processResult?.success) {
+          throw new Error('Document processing failed');
+        }
+
+        // Refetch the document after processing
+        const { data: processedDocument, error: refetchError } = await supabaseClient
+          .from('uploaded_documents')
+          .select('*')
+          .eq('id', documentId)
+          .eq('user_id', userId)
+          .single();
+
+        if (refetchError || !processedDocument?.document_text) {
+          throw new Error('Document text still not available after processing');
+        }
+
+        // Update document reference
+        Object.assign(document, processedDocument);
+        console.log('Document processed successfully');
+      } catch (error) {
+        console.error('Document processing error:', error);
+        throw new Error(`Failed to process document: ${error.message}`);
+      }
+    }
+
     // Get or create assessment progress record
     const { data: progressData, error: progressError } = await supabaseClient
       .from('assessment_progress')
@@ -69,22 +118,6 @@ serve(async (req) => {
       throw progressError;
     } else {
       assessmentProgress = progressData;
-    }
-
-    // Get document
-    const { data: document, error: docError } = await supabaseClient
-      .from('uploaded_documents')
-      .select('*')
-      .eq('id', documentId)
-      .eq('user_id', userId)
-      .single();
-
-    if (docError || !document) {
-      throw new Error('Document not found or not accessible');
-    }
-
-    if (!document.document_text) {
-      throw new Error('Document text not available. Please process the document first.');
     }
 
     // Get questionnaire
