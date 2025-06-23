@@ -1,4 +1,3 @@
-
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -162,12 +161,12 @@ serve(async (req) => {
     // Calculate final credibility score (0-100)
     const credibilityScore = maxPossibleScore > 0 ? Math.round((totalScore / maxPossibleScore) * 100) : 0;
 
-    // Store assessment report
+    // Store assessment report with document file name as company name
     const { data: reportData, error: reportError } = await supabaseClient
       .from('assessment_reports')
       .insert({
         user_id: userId,
-        company_name: 'Document Assessment', // You might want to extract this from the document
+        company_name: document.file_name || 'Document Assessment',
         assessment_data: {
           sections: assessmentResults,
           totalScore,
@@ -184,7 +183,7 @@ serve(async (req) => {
       throw new Error('Failed to save assessment report');
     }
 
-    // Update document status
+    // Update document status and make it permanent
     await supabaseClient
       .from('uploaded_documents')
       .update({

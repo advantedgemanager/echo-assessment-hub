@@ -8,7 +8,7 @@ import FileUpload from '@/components/FileUpload';
 import AssessmentProgress from '@/components/AssessmentProgress';
 import AssessmentResults from '@/components/AssessmentResults';
 import { useAssessment } from '@/hooks/useAssessment';
-import { Play, LogOut, FileText, RotateCcw } from 'lucide-react';
+import { Play, LogOut, FileText, RotateCcw, History } from 'lucide-react';
 
 const Dashboard = () => {
   const [uploadedDocumentId, setUploadedDocumentId] = useState<string | null>(null);
@@ -64,10 +64,16 @@ const Dashboard = () => {
             <h1 className="text-2xl font-bold">Credibility Assessment Dashboard</h1>
             <p className="text-muted-foreground">Welcome, {user.email}</p>
           </div>
-          <Button variant="outline" onClick={handleSignOut}>
-            <LogOut className="h-4 w-4 mr-2" />
-            Sign Out
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={() => navigate('/my-reports')}>
+              <History className="h-4 w-4 mr-2" />
+              My Reports
+            </Button>
+            <Button variant="outline" onClick={handleSignOut}>
+              <LogOut className="h-4 w-4 mr-2" />
+              Sign Out
+            </Button>
+          </div>
         </div>
       </header>
 
@@ -85,10 +91,14 @@ const Dashboard = () => {
           {assessmentState.status === 'completed' && assessmentState.results && (
             <div className="space-y-6">
               <AssessmentResults {...assessmentState.results} />
-              <div className="text-center">
+              <div className="text-center space-x-4">
                 <Button onClick={handleStartNewAssessment} variant="outline">
                   <RotateCcw className="h-4 w-4 mr-2" />
                   Start New Assessment
+                </Button>
+                <Button onClick={() => navigate('/my-reports')} variant="outline">
+                  <History className="h-4 w-4 mr-2" />
+                  View All Reports
                 </Button>
               </div>
             </div>
