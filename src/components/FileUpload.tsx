@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Upload, File, CheckCircle } from 'lucide-react';
+import { Upload, File, CheckCircle, AlertTriangle } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
@@ -19,20 +19,42 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
   const [uploading, setUploading] = useState(false);
   const [uploadComplete, setUploadComplete] = useState(false);
   const [error, setError] = useState('');
+  const [sizeWarning, setSizeWarning] = useState('');
   const { user } = useAuth();
   const { toast } = useToast();
+
+  // Size limits
+  const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+  const LARGE_FILE_WARNING = 3 * 1024 * 1024; // 3MB
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = event.target.files?.[0];
     if (selectedFile) {
       const allowedTypes = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
-      if (allowedTypes.includes(selectedFile.type)) {
-        setFile(selectedFile);
-        setError('');
-        setUploadComplete(false);
-      } else {
+      
+      if (!allowedTypes.includes(selectedFile.type)) {
         setError('Please select a PDF or DOCX file');
         setFile(null);
+        setSizeWarning('');
+        return;
+      }
+
+      if (selectedFile.size > MAX_FILE_SIZE) {
+        setError(`File size exceeds ${MAX_FILE_SIZE / (1024 * 1024)}MB limit`);
+        setFile(null);
+        setSizeWarning('');
+        return;
+      }
+
+      setFile(selectedFile);
+      setError('');
+      setUploadComplete(false);
+
+      // Show warning for large files
+      if (selectedFile.size > LARGE_FILE_WARNING) {
+        setSizeWarning(`Large file detected (${(selectedFile.size / (1024 * 1024)).toFixed(1)}MB). Processing may take longer and the document might be truncated for assessment.`);
+      } else {
+        setSizeWarning('');
       }
     }
   };
@@ -121,6 +143,13 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
           )}
         </div>
 
+        {sizeWarning && (
+          <Alert>
+            <AlertTriangle className="h-4 w-4" />
+            <AlertDescription>{sizeWarning}</AlertDescription>
+          </Alert>
+        )}
+
         {error && (
           <Alert variant="destructive">
             <AlertDescription>{error}</AlertDescription>
@@ -143,6 +172,12 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
         >
           {uploading ? 'Uploading...' : 'Upload Document'}
         </Button>
+
+        <div className="text-xs text-muted-foreground">
+          <p>• Maximum file size: {MAX_FILE_SIZE / (1024 * 1024)}MB</p>
+          <p>• Supported formats: PDF, DOCX</p>
+          <p>• Large documents may be truncated for processing</p>
+        </div>
       </CardContent>
     </Card>
   );
