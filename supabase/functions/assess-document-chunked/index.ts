@@ -1,3 +1,4 @@
+
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -17,7 +18,7 @@ serve(async (req) => {
   const startTime = Date.now();
   
   try {
-    console.log('=== Starting chunked assessment with Mistral v5.0 ===');
+    console.log('=== Starting optimized chunked assessment ===');
     
     const supabaseClient = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
@@ -25,7 +26,7 @@ serve(async (req) => {
     );
 
     const { documentId, userId, batchNumber = 0 } = await req.json();
-    console.log(`Processing chunked assessment for document: ${documentId}, user: ${userId}, batch: ${batchNumber}`);
+    console.log(`Processing batch ${batchNumber} for document: ${documentId}`);
 
     if (!documentId || !userId) {
       throw new Error('Document ID and User ID are required');
@@ -38,7 +39,7 @@ serve(async (req) => {
     // Get document
     const { data: document, error: docError } = await supabaseClient
       .from('uploaded_documents')
-      .select('*')
+      .select('id, file_name, document_text')
       .eq('id', documentId)
       .eq('user_id', userId)
       .single();
@@ -51,38 +52,28 @@ serve(async (req) => {
     if (!document.document_text) {
       console.log('Document text not available, processing document first...');
       
-      try {
-        const { data: processResult, error: processError } = await supabaseClient.functions.invoke('document-processor', {
-          body: { documentId, userId }
-        });
+      const { data: processResult, error: processError } = await supabaseClient.functions.invoke('document-processor', {
+        body: { documentId }
+      });
 
-        if (processError) {
-          throw new Error(`Failed to process document: ${processError.message}`);
-        }
-
-        if (!processResult?.success) {
-          throw new Error('Document processing failed');
-        }
-
-        // Refetch the document after processing
-        const { data: processedDocument, error: refetchError } = await supabaseClient
-          .from('uploaded_documents')
-          .select('*')
-          .eq('id', documentId)
-          .eq('user_id', userId)
-          .single();
-
-        if (refetchError || !processedDocument?.document_text) {
-          throw new Error('Document text still not available after processing');
-        }
-
-        // Update document reference
-        Object.assign(document, processedDocument);
-        console.log('Document processed successfully');
-      } catch (error) {
-        console.error('Document processing error:', error);
-        throw new Error(`Failed to process document: ${error.message}`);
+      if (processError || !processResult?.success) {
+        throw new Error('Document processing failed');
       }
+
+      // Refetch the document after processing
+      const { data: processedDocument, error: refetchError } = await supabaseClient
+        .from('uploaded_documents')
+        .select('id, file_name, document_text')
+        .eq('id', documentId)
+        .eq('user_id', userId)
+        .single();
+
+      if (refetchError || !processedDocument?.document_text) {
+        throw new Error('Document text still not available after processing');
+      }
+
+      document.document_text = processedDocument.document_text;
+      console.log('Document processed successfully');
     }
 
     // Get or create assessment progress record
@@ -106,7 +97,7 @@ serve(async (req) => {
           total_batches: 0,
           processed_questions: 0,
           total_questions: 0,
-          sections_data: [],
+          batch_results: [],
           created_at: new Date().toISOString()
         })
         .select()
@@ -120,7 +111,7 @@ serve(async (req) => {
       assessmentProgress = progressData;
     }
 
-    // Get questionnaire
+    // Get questionnaire with minimal data transfer
     const questionnaireResponse = await supabaseClient.functions.invoke('questionnaire-manager', {
       body: { action: 'retrieve' }
     });
@@ -130,19 +121,20 @@ serve(async (req) => {
     }
 
     const questionnaireData = questionnaireResponse.data;
-    const questionnaire = questionnaireData.questionnaire?.sections || questionnaireData?.sections || [];
+    const questionnaire = questionnaireData.questionnaire?.sections || [];
     
     if (!Array.isArray(questionnaire) || questionnaire.length === 0) {
       throw new Error('Invalid questionnaire format');
     }
 
-    // Flatten all questions for batch processing
+    // Flatten questions efficiently
     const allQuestions = [];
     questionnaire.forEach((section, sectionIndex) => {
       if (section.questions && Array.isArray(section.questions)) {
         section.questions.forEach((question, questionIndex) => {
           allQuestions.push({
-            ...question,
+            id: question.id || `q_${allQuestions.length}`,
+            text: question.question_text || question.text || question.questionText,
             sectionIndex,
             sectionTitle: section.title || section.id,
             questionIndex,
@@ -153,7 +145,7 @@ serve(async (req) => {
     });
 
     const totalQuestions = allQuestions.length;
-    const batchSize = 10; // Smaller batch size for Mistral reliability
+    const batchSize = 5; // Reduced batch size for memory optimization
     const totalBatches = Math.ceil(totalQuestions / batchSize);
 
     // Update progress with total counts
@@ -174,33 +166,54 @@ serve(async (req) => {
 
     console.log(`Processing batch ${batchNumber + 1}/${totalBatches} (questions ${startIndex + 1}-${endIndex})`);
 
-    // Create document chunks (optimized)
-    const documentChunks = createDocumentChunks(document.document_text, 3000, 600);
-    const chunksToProcess = documentChunks.slice(0, 6); // Limit chunks for speed
+    // Create smaller, more efficient document chunks
+    const documentChunks = createOptimizedChunks(document.document_text, 2000, 300);
+    const chunksToProcess = documentChunks.slice(0, 3); // Limit to 3 chunks for memory efficiency
 
-    // Process questions in this batch
+    // Process questions in this batch with memory optimization
     const batchResults = [];
     for (const question of batchQuestions) {
-      const questionResult = await processQuestionWithMistral(
-        question,
-        chunksToProcess,
-        mistralApiKey
-      );
-      batchResults.push(questionResult);
-      console.log(`Processed question ${question.globalIndex + 1}/${totalQuestions}: ${questionResult.response}`);
+      try {
+        const questionResult = await processQuestionWithMistral(
+          question,
+          chunksToProcess,
+          mistralApiKey
+        );
+        batchResults.push(questionResult);
+        console.log(`Processed question ${question.globalIndex + 1}/${totalQuestions}: ${questionResult.response}`);
+        
+        // Clear memory between questions
+        if (global.gc) global.gc();
+      } catch (error) {
+        console.error(`Error processing question ${question.globalIndex}:`, error);
+        batchResults.push({
+          questionId: question.id,
+          questionText: question.text,
+          response: 'Insufficient',
+          score: 0,
+          weight: 1,
+          sectionTitle: question.sectionTitle,
+          sectionIndex: question.sectionIndex
+        });
+      }
     }
 
-    // Update progress
+    // Update progress efficiently
     const newProcessedCount = assessmentProgress.processed_questions + batchResults.length;
     const progressPercentage = Math.round((newProcessedCount / totalQuestions) * 100);
 
+    // Store results efficiently
+    const existingResults = Array.isArray(assessmentProgress.batch_results) 
+      ? assessmentProgress.batch_results 
+      : [];
+    
     await supabaseClient
       .from('assessment_progress')
       .update({
         current_batch: batchNumber + 1,
         processed_questions: newProcessedCount,
         progress_percentage: progressPercentage,
-        batch_results: batchResults,
+        batch_results: [...existingResults, ...batchResults],
         updated_at: new Date().toISOString()
       })
       .eq('id', assessmentProgress.id);
@@ -251,14 +264,19 @@ serve(async (req) => {
   }
 });
 
-function createDocumentChunks(text: string, chunkSize: number, overlap: number): string[] {
+function createOptimizedChunks(text: string, chunkSize: number, overlap: number): string[] {
   const chunks: string[] = [];
   let start = 0;
   
-  while (start < text.length) {
+  // Limit total chunks to prevent memory issues
+  const maxChunks = 5;
+  let chunkCount = 0;
+  
+  while (start < text.length && chunkCount < maxChunks) {
     const end = Math.min(start + chunkSize, text.length);
     chunks.push(text.substring(start, end));
     start = end - overlap;
+    chunkCount++;
     if (start >= text.length) break;
   }
   
@@ -270,10 +288,8 @@ async function processQuestionWithMistral(
   documentChunks: string[],
   apiKey: string
 ): Promise<any> {
-  const questionText = question.question_text || question.text || question.questionText;
-  
-  // Find most relevant chunk
-  const relevantChunk = findMostRelevantChunk(documentChunks, questionText);
+  // Find most relevant chunk efficiently
+  const relevantChunk = findMostRelevantChunk(documentChunks, question.text);
   
   const systemPrompt = `You are an expert evaluator of corporate climate transition plans. Analyze the document content and answer whether it provides clear evidence for the specific question asked.
 
@@ -281,16 +297,13 @@ INSTRUCTIONS:
 - Answer with exactly one word: "Yes", "No", or "Insufficient"
 - "Yes" only if there is explicit, specific evidence
 - "No" if the document clearly contradicts or lacks the requirement
-- "Insufficient" if the content is vague or doesn't directly address the question
+- "Insufficient" if the content is vague or doesn't directly address the question`;
 
-Focus on substance over declarations. Look for specific commitments, quantifiable targets, detailed processes, and concrete implementation plans.`;
-
-  const userPrompt = `Question: "${questionText}"
+  const userPrompt = `Question: "${question.text}"
 
 Document Content:
 ${relevantChunk}
 
-Based on this content, does the document provide clear evidence to answer "Yes" to this question?
 Answer with one word only: Yes, No, or Insufficient`;
 
   try {
@@ -306,7 +319,7 @@ Answer with one word only: Yes, No, or Insufficient`;
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt }
         ],
-        max_tokens: 10,
+        max_tokens: 5,
         temperature: 0.0
       }),
     });
@@ -330,8 +343,8 @@ Answer with one word only: Yes, No, or Insufficient`;
     const score = normalizedResponse === 'Yes' ? 1 : 0;
 
     return {
-      questionId: question.id || question.questionId || `q_${question.globalIndex}`,
-      questionText,
+      questionId: question.id,
+      questionText: question.text,
       response: normalizedResponse,
       score,
       weight: 1,
@@ -342,8 +355,8 @@ Answer with one word only: Yes, No, or Insufficient`;
   } catch (error) {
     console.error(`Error processing question ${question.globalIndex}:`, error);
     return {
-      questionId: question.id || question.questionId || `q_${question.globalIndex}`,
-      questionText,
+      questionId: question.id,
+      questionText: question.text,
       response: 'Insufficient',
       score: 0,
       weight: 1,
@@ -364,7 +377,7 @@ function findMostRelevantChunk(chunks: string[], questionText: string): string {
     
     keywords.forEach(keyword => {
       if (chunkLower.includes(keyword.toLowerCase())) {
-        score += 2;
+        score += 1;
       }
     });
 
@@ -374,21 +387,20 @@ function findMostRelevantChunk(chunks: string[], questionText: string): string {
     }
   }
 
-  return bestChunk.substring(0, 2500); // Limit size for API
+  return bestChunk.substring(0, 1500); // Limit size for memory efficiency
 }
 
 function extractKeywords(questionText: string): string[] {
   const commonKeywords = [
     'net zero', 'carbon neutral', 'emissions', 'climate', 'transition',
-    'targets', 'governance', 'board', 'strategy', 'plan', 'progress',
-    'verification', 'science-based', 'scope 1', 'scope 2', 'scope 3',
-    'renewable', 'sustainability', 'decarbonization', 'compensation'
+    'targets', 'governance', 'board', 'strategy', 'plan', 'progress'
   ];
 
   const questionWords = questionText.toLowerCase().split(/\s+/)
-    .filter(word => word.length > 3);
+    .filter(word => word.length > 3)
+    .slice(0, 5); // Limit keywords for memory efficiency
 
-  return [...commonKeywords, ...questionWords];
+  return [...commonKeywords.slice(0, 6), ...questionWords];
 }
 
 async function finalizeAssessment(
@@ -400,16 +412,16 @@ async function finalizeAssessment(
 ) {
   console.log('Finalizing assessment...');
   
-  // Get all batch results
+  // Get all batch results efficiently
   const { data: progress } = await supabaseClient
     .from('assessment_progress')
-    .select('*')
+    .select('batch_results')
     .eq('id', progressId)
     .single();
 
-  if (!progress?.batch_results) return;
+  if (!progress?.batch_results || !Array.isArray(progress.batch_results)) return;
 
-  // Aggregate results by section
+  // Aggregate results by section efficiently
   const sectionMap = new Map();
   let totalScore = 0;
   let maxPossibleScore = 0;
