@@ -1,4 +1,3 @@
-
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -39,7 +38,7 @@ serve(async (req) => {
     // Get document
     const { data: document, error: docError } = await supabaseClient
       .from('uploaded_documents')
-      .select('id, file_name, document_text')
+      .select('id, file_name, document_text, file_path, file_type')
       .eq('id', documentId)
       .eq('user_id', userId)
       .single();
@@ -49,15 +48,21 @@ serve(async (req) => {
     }
 
     // If document text is not available, process it first
-    if (!document.document_text) {
-      console.log('Document text not available, processing document first...');
+    if (!document.document_text || document.document_text.trim().length < 100) {
+      console.log('Document text not available or too short, processing document first...');
       
       const { data: processResult, error: processError } = await supabaseClient.functions.invoke('document-processor', {
         body: { documentId }
       });
 
-      if (processError || !processResult?.success) {
-        throw new Error('Document processing failed');
+      if (processError) {
+        console.error('Document processing error:', processError);
+        throw new Error(`Document processing failed: ${processError.message}`);
+      }
+
+      if (!processResult?.success) {
+        console.error('Document processing failed:', processResult);
+        throw new Error('Document processing failed - no readable text extracted');
       }
 
       // Refetch the document after processing
@@ -73,8 +78,24 @@ serve(async (req) => {
       }
 
       document.document_text = processedDocument.document_text;
-      console.log('Document processed successfully');
+      console.log(`Document processed successfully, text length: ${document.document_text.length}`);
     }
+
+    // Validate that we have readable text content
+    const textContent = document.document_text.trim();
+    if (textContent.length < 100) {
+      throw new Error('Document text is too short or empty - unable to perform assessment');
+    }
+
+    // Check if the text looks like binary data
+    const binaryDataIndicators = /[\x00-\x08\x0E-\x1F\x7F-\xFF]/g;
+    const binaryMatches = textContent.match(binaryDataIndicators);
+    if (binaryMatches && binaryMatches.length > textContent.length * 0.1) {
+      console.warn('Document appears to contain binary data, may need better text extraction');
+    }
+
+    console.log(`Working with document text: ${textContent.length} characters`);
+    console.log(`Text preview: ${textContent.substring(0, 300)}...`);
 
     // Get or create assessment progress record
     const { data: progressData, error: progressError } = await supabaseClient
@@ -167,10 +188,13 @@ serve(async (req) => {
     console.log(`Processing batch ${batchNumber + 1}/${totalBatches} (questions ${startIndex + 1}-${endIndex})`);
 
     // Create smaller, more efficient document chunks
-    const documentChunks = createOptimizedChunks(document.document_text, 2000, 300);
-    const chunksToProcess = documentChunks.slice(0, 3); // Limit to 3 chunks for memory efficiency
+    const documentChunks = createOptimizedChunks(textContent, 3000, 500);
+    const chunksToProcess = documentChunks.slice(0, 4); // Slightly increased for better coverage
+    
+    console.log(`Created ${documentChunks.length} chunks, processing ${chunksToProcess.length}`);
+    console.log(`Sample chunk: ${chunksToProcess[0]?.substring(0, 200)}...`);
 
-    // Process questions in this batch with memory optimization
+    // Process questions in this batch with improved error handling
     const batchResults = [];
     for (const question of batchQuestions) {
       try {
@@ -182,8 +206,9 @@ serve(async (req) => {
         batchResults.push(questionResult);
         console.log(`Processed question ${question.globalIndex + 1}/${totalQuestions}: ${questionResult.response}`);
         
-        // Clear memory between questions
-        if (global.gc) global.gc();
+        // Small delay between questions to avoid rate limits
+        await new Promise(resolve => setTimeout(resolve, 200));
+        
       } catch (error) {
         console.error(`Error processing question ${question.globalIndex}:`, error);
         batchResults.push({
@@ -193,7 +218,8 @@ serve(async (req) => {
           score: 0,
           weight: 1,
           sectionTitle: question.sectionTitle,
-          sectionIndex: question.sectionIndex
+          sectionIndex: question.sectionIndex,
+          error: error.message
         });
       }
     }
@@ -248,13 +274,15 @@ serve(async (req) => {
   } catch (error: any) {
     const processingTime = Date.now() - startTime;
     console.error('Error in chunked assessment:', error);
+    console.error('Error stack:', error.stack);
     
     return new Response(
       JSON.stringify({ 
         error: error.message,
         success: false,
         processingTime,
-        batchNumber
+        batchNumber,
+        details: error.stack
       }),
       {
         status: 500,
@@ -269,14 +297,20 @@ function createOptimizedChunks(text: string, chunkSize: number, overlap: number)
   let start = 0;
   
   // Limit total chunks to prevent memory issues
-  const maxChunks = 5;
+  const maxChunks = 6;
   let chunkCount = 0;
   
   while (start < text.length && chunkCount < maxChunks) {
     const end = Math.min(start + chunkSize, text.length);
-    chunks.push(text.substring(start, end));
+    const chunk = text.substring(start, end);
+    
+    // Only add chunks with meaningful content
+    if (chunk.trim().length > 100) {
+      chunks.push(chunk);
+      chunkCount++;
+    }
+    
     start = end - overlap;
-    chunkCount++;
     if (start >= text.length) break;
   }
   
@@ -291,20 +325,26 @@ async function processQuestionWithMistral(
   // Find most relevant chunk efficiently
   const relevantChunk = findMostRelevantChunk(documentChunks, question.text);
   
-  const systemPrompt = `You are an expert evaluator of corporate climate transition plans. Analyze the document content and answer whether it provides clear evidence for the specific question asked.
+  console.log(`Processing question: ${question.text.substring(0, 100)}...`);
+  console.log(`Using chunk: ${relevantChunk.substring(0, 200)}...`);
+
+  const systemPrompt = `You are an expert evaluator of corporate climate transition plans. Analyze the document content carefully and answer whether it provides clear evidence for the specific question asked.
 
 INSTRUCTIONS:
+- Read the document content thoroughly
 - Answer with exactly one word: "Yes", "No", or "Insufficient"
-- "Yes" only if there is explicit, specific evidence
+- "Yes" only if there is explicit, specific evidence in the document
 - "No" if the document clearly contradicts or lacks the requirement
-- "Insufficient" if the content is vague or doesn't directly address the question`;
+- "Insufficient" if the content is vague, unclear, or doesn't directly address the question
+
+Important: Base your answer ONLY on what is explicitly stated in the document content provided.`;
 
   const userPrompt = `Question: "${question.text}"
 
-Document Content:
+Document Content to Analyze:
 ${relevantChunk}
 
-Answer with one word only: Yes, No, or Insufficient`;
+Based on the document content above, does it provide clear evidence to answer this question? Answer with one word only: Yes, No, or Insufficient`;
 
   try {
     const response = await fetch('https://api.mistral.ai/v1/chat/completions', {
@@ -319,17 +359,21 @@ Answer with one word only: Yes, No, or Insufficient`;
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt }
         ],
-        max_tokens: 5,
-        temperature: 0.0
+        max_tokens: 10,
+        temperature: 0.1
       }),
     });
 
     if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`Mistral API error: ${response.status} - ${errorText}`);
       throw new Error(`Mistral API error: ${response.status}`);
     }
 
     const data = await response.json();
     const aiResponse = data.choices[0]?.message?.content?.trim() || 'Insufficient';
+    
+    console.log(`AI response for question: ${aiResponse}`);
     
     let normalizedResponse: 'Yes' | 'No' | 'Insufficient' = 'Insufficient';
     const responseLower = aiResponse.toLowerCase();
@@ -354,15 +398,7 @@ Answer with one word only: Yes, No, or Insufficient`;
 
   } catch (error) {
     console.error(`Error processing question ${question.globalIndex}:`, error);
-    return {
-      questionId: question.id,
-      questionText: question.text,
-      response: 'Insufficient',
-      score: 0,
-      weight: 1,
-      sectionTitle: question.sectionTitle,
-      sectionIndex: question.sectionIndex
-    };
+    throw error;
   }
 }
 
@@ -376,10 +412,14 @@ function findMostRelevantChunk(chunks: string[], questionText: string): string {
     const chunkLower = chunk.toLowerCase();
     
     keywords.forEach(keyword => {
-      if (chunkLower.includes(keyword.toLowerCase())) {
-        score += 1;
-      }
+      const keywordLower = keyword.toLowerCase();
+      // Count occurrences of each keyword
+      const matches = (chunkLower.match(new RegExp(keywordLower, 'gi')) || []).length;
+      score += matches * 2; // Weight keyword matches higher
     });
+
+    // Bonus for chunk length (longer chunks likely have more context)
+    score += Math.min(chunk.length / 1000, 2);
 
     if (score > highestScore) {
       highestScore = score;
@@ -387,20 +427,23 @@ function findMostRelevantChunk(chunks: string[], questionText: string): string {
     }
   }
 
-  return bestChunk.substring(0, 1500); // Limit size for memory efficiency
+  // Ensure chunk is not too long for API
+  return bestChunk.substring(0, 2000);
 }
 
 function extractKeywords(questionText: string): string[] {
   const commonKeywords = [
     'net zero', 'carbon neutral', 'emissions', 'climate', 'transition',
-    'targets', 'governance', 'board', 'strategy', 'plan', 'progress'
+    'targets', 'governance', 'board', 'strategy', 'plan', 'progress',
+    'scope 1', 'scope 2', 'scope 3', 'ghg', 'greenhouse gas'
   ];
 
-  const questionWords = questionText.toLowerCase().split(/\s+/)
-    .filter(word => word.length > 3)
-    .slice(0, 5); // Limit keywords for memory efficiency
+  const questionWords = questionText.toLowerCase()
+    .split(/\s+/)
+    .filter(word => word.length > 3 && !['what', 'does', 'have', 'been', 'will', 'this', 'that', 'with', 'from', 'they', 'their'].includes(word))
+    .slice(0, 8);
 
-  return [...commonKeywords.slice(0, 6), ...questionWords];
+  return [...commonKeywords.slice(0, 8), ...questionWords];
 }
 
 async function finalizeAssessment(
