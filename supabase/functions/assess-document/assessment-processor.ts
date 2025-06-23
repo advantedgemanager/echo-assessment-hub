@@ -1,3 +1,4 @@
+
 import { evaluateQuestionAgainstChunks, QuestionEvaluation } from './ai-evaluator.ts';
 
 export interface SectionResult {
@@ -33,9 +34,9 @@ export const processAssessment = async (
   checkTimeout?: () => void,
   documentWasTruncated: boolean = false
 ): Promise<AssessmentResults> => {
-  console.log('Starting comprehensive assessment for large questionnaire (up to 265 questions)');
+  console.log('Starting enhanced assessment for large questionnaire (up to 265 questions)');
   
-  // Enhanced questionnaire extraction with fallback handling
+  // Enhanced questionnaire extraction with better fallback handling
   let questionnaire = questionnaireData;
   if (questionnaireData.questionnaire) {
     questionnaire = questionnaireData.questionnaire;
@@ -65,7 +66,7 @@ export const processAssessment = async (
     throw new Error('Invalid questionnaire format: no sections found');
   }
 
-  console.log(`Processing ${questionnaire.sections.length} sections with comprehensive methodology`);
+  console.log(`Processing ${questionnaire.sections.length} sections with enhanced methodology`);
   console.log('Available sections:', questionnaire.sections.map(s => ({ id: s.id, title: s.title, questions: s.questions?.length || 0 })));
   
   const sectionResults: SectionResult[] = [];
@@ -81,12 +82,9 @@ export const processAssessment = async (
     }
   });
   
-  // REMOVED LIMITS - Process ALL questions available (up to 265)
-  const maxQuestionsToProcess = totalQuestionsCount; // Process ALL questions
-  
-  console.log(`Total questions available: ${totalQuestionsCount}, processing ALL questions (${maxQuestionsToProcess})`);
+  console.log(`Total questions available: ${totalQuestionsCount}, processing ALL questions`);
 
-  // Process each section with comprehensive coverage
+  // Process each section with enhanced coverage
   for (const section of questionnaire.sections) {
     if (checkTimeout) checkTimeout();
     
@@ -102,13 +100,14 @@ export const processAssessment = async (
     let sectionNoCount = 0;
     let sectionNaCount = 0;
     
-    // REMOVED PER-SECTION LIMITS - Process ALL questions in each section
-    const questionsToProcess = section.questions; // Process ALL questions in section
+    // Process ALL questions in each section
+    const questionsToProcess = section.questions;
+    const sectionTotalQuestions = questionsToProcess.length;
     
     console.log(`Processing ${questionsToProcess.length} questions in section: ${section.title || section.id}`);
     
-    // Process questions in batches to manage memory and performance
-    const batchSize = 10; // Process 10 questions at a time
+    // Process questions in smaller batches to improve success rate
+    const batchSize = 5; // Reduced batch size for better reliability
     for (let i = 0; i < questionsToProcess.length; i += batchSize) {
       if (checkTimeout) checkTimeout();
       
@@ -160,9 +159,9 @@ export const processAssessment = async (
           questionEvaluations.push(questionEvaluation);
           questionsProcessed++;
           
-          // Add small delay between questions to prevent rate limiting
-          if (questionsProcessed % 5 === 0) {
-            await new Promise(resolve => setTimeout(resolve, 200));
+          // Add progressive delay to prevent rate limiting
+          if (questionsProcessed % 3 === 0) {
+            await new Promise(resolve => setTimeout(resolve, 500));
           }
           
         } catch (questionError) {
@@ -173,7 +172,7 @@ export const processAssessment = async (
             questionId: questionId,
             questionText: questionText,
             response: 'Not enough information',
-            score: (question.score_na || 0) * 0.5,
+            score: (question.score_na || 0) * 0.3,
             weight: 1
           };
           
@@ -212,7 +211,7 @@ export const processAssessment = async (
   const assessmentResult = calculateEnhancedOverallResult(sectionResults, questionsProcessed, totalQuestionsCount);
   const assessmentCompleteness = totalQuestionsCount > 0 ? Math.round((questionsProcessed / totalQuestionsCount) * 100) : 0;
   
-  console.log(`Comprehensive assessment completed with result: ${assessmentResult.overallResult}`);
+  console.log(`Enhanced assessment completed with result: ${assessmentResult.overallResult}`);
   console.log(`Questions processed: ${questionsProcessed}/${totalQuestionsCount} (${assessmentCompleteness}%)`);
   console.log(`Red flag triggered: ${assessmentResult.redFlagTriggered}`);
   console.log(`Reasoning: ${assessmentResult.reasoning}`);
@@ -315,12 +314,12 @@ function calculateEnhancedOverallResult(sectionResults: SectionResult[], process
   }
 
   // Adjust scoring thresholds based on completeness and section performance
-  let baseThreshold = 40;
-  let alignedThreshold = 70;
+  let baseThreshold = 35;
+  let alignedThreshold = 65;
   
   if (completeness < 70) {
-    baseThreshold = 35;
-    alignedThreshold = 65;
+    baseThreshold = 30;
+    alignedThreshold = 60;
   }
 
   // Enhanced scoring considers overall performance across all sections
@@ -337,7 +336,7 @@ function calculateEnhancedOverallResult(sectionResults: SectionResult[], process
     baseResult = 'Aligned';
   } else if (combinedScore >= baseThreshold) {
     baseResult = 'Aligning';
-  } else if (combinedScore >= 20) {
+  } else if (combinedScore >= 15) {
     baseResult = 'Partially Aligned';
   } else {
     baseResult = 'Misaligned';
@@ -346,22 +345,22 @@ function calculateEnhancedOverallResult(sectionResults: SectionResult[], process
   // Enhanced evaluation of other sections with more balanced approach
   let finalResult = baseResult;
   const downgrades: string[] = [];
-  let upgrades: string[] = [];
+  const upgrades: string[] = [];
 
   if (depthSection && depthSection.questions.length > 0) {
-    if (depthSection.yesPercentage < 30) {
+    if (depthSection.yesPercentage < 25) {
       downgrades.push(`${depthSection.sectionTitle} (${depthSection.yesPercentage}%)`);
       finalResult = downgradeResult(finalResult);
-    } else if (depthSection.yesPercentage > 70) {
+    } else if (depthSection.yesPercentage > 75) {
       upgrades.push(`${depthSection.sectionTitle} (${depthSection.yesPercentage}%)`);
     }
   }
 
   if (actionSection && actionSection.questions.length > 0) {
-    if (actionSection.yesPercentage < 30) {
+    if (actionSection.yesPercentage < 25) {
       downgrades.push(`${actionSection.sectionTitle} (${actionSection.yesPercentage}%)`);
       finalResult = downgradeResult(finalResult);
-    } else if (actionSection.yesPercentage > 70) {
+    } else if (actionSection.yesPercentage > 75) {
       upgrades.push(`${actionSection.sectionTitle} (${actionSection.yesPercentage}%)`);
     }
   }

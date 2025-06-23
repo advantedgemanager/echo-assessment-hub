@@ -1,4 +1,3 @@
-
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -19,9 +18,9 @@ const corsHeaders = {
 const mistralApiKey = Deno.env.get('MISTRAL_API_KEY');
 
 // Enhanced resource limits for comprehensive 265-question assessment
-const MAX_PROCESSING_TIME = 20 * 60 * 1000; // Increased to 20 minutes for 265 questions
-const MAX_DOCUMENT_LENGTH = 300000; // Increased to 300k characters
-const MAX_CHUNKS = 75; // Increased chunk limit for better coverage
+const MAX_PROCESSING_TIME = 25 * 60 * 1000; // Increased to 25 minutes for 265 questions
+const MAX_DOCUMENT_LENGTH = 500000; // Increased to 500k characters for larger documents
+const MAX_CHUNKS = 100; // Increased chunk limit for better coverage
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -31,7 +30,7 @@ serve(async (req) => {
   const startTime = Date.now();
   
   try {
-    console.log('=== Starting comprehensive 265-question assessment v3.0 ===');
+    console.log('=== Starting enhanced 265-question assessment v4.0 ===');
     
     const supabaseClient = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
@@ -39,7 +38,7 @@ serve(async (req) => {
     );
 
     const { documentId, userId } = await req.json();
-    console.log(`Processing comprehensive assessment for document: ${documentId}, user: ${userId}`);
+    console.log(`Processing enhanced assessment for document: ${documentId}, user: ${userId}`);
 
     if (!documentId || !userId) {
       throw new Error('Document ID and User ID are required');
@@ -53,7 +52,7 @@ serve(async (req) => {
     const checkTimeout = () => {
       const elapsed = Date.now() - startTime;
       if (elapsed > MAX_PROCESSING_TIME) {
-        throw new Error(`Processing timeout - comprehensive assessment taking too long (${Math.round(elapsed/1000)}s)`);
+        throw new Error(`Processing timeout - enhanced assessment taking too long (${Math.round(elapsed/1000)}s)`);
       }
     };
 
@@ -67,39 +66,57 @@ serve(async (req) => {
       throw new Error('Document text not available. Please process the document first.');
     }
 
-    // Enhanced document handling with better truncation strategy
+    // Enhanced document handling with smarter truncation strategy
     let documentWasTruncated = false;
     let processedText = document.document_text;
     
     if (document.document_text.length > MAX_DOCUMENT_LENGTH) {
-      console.warn(`Document size: ${document.document_text.length} chars, truncating to ${MAX_DOCUMENT_LENGTH}`);
+      console.warn(`Document size: ${document.document_text.length} chars, applying smart truncation to ${MAX_DOCUMENT_LENGTH}`);
       
-      // Smart truncation - try to keep complete sections
+      // Smart truncation - prioritize transition plan content
       const text = document.document_text;
-      const truncationPoint = MAX_DOCUMENT_LENGTH;
+      const transitionKeywords = [
+        'transition plan', 'net zero', 'carbon neutral', 'climate',
+        'emissions', 'sustainability', 'environmental', 'ESG',
+        'greenhouse gas', 'GHG', 'scope 1', 'scope 2', 'scope 3',
+        'carbon footprint', 'renewable energy', 'clean energy'
+      ];
       
-      // Look for section breaks near the truncation point
-      const sectionBreaks = ['\n\n', '\n#', '\nSection', '\nChapter'];
-      let bestTruncationPoint = truncationPoint;
-      
-      for (const breakPattern of sectionBreaks) {
-        const lastBreak = text.lastIndexOf(breakPattern, truncationPoint);
-        if (lastBreak > truncationPoint * 0.8) {
-          bestTruncationPoint = lastBreak;
-          break;
-        }
+      // Find sections with high concentration of transition-related keywords
+      const chunks = [];
+      const chunkSize = 50000;
+      for (let i = 0; i < text.length; i += chunkSize) {
+        const chunk = text.substring(i, i + chunkSize);
+        const keywordCount = transitionKeywords.reduce((count, keyword) => 
+          count + (chunk.toLowerCase().match(new RegExp(keyword, 'gi')) || []).length, 0
+        );
+        chunks.push({ text: chunk, keywordCount, position: i });
       }
       
-      processedText = text.substring(0, bestTruncationPoint);
+      // Sort by keyword relevance and keep most relevant sections
+      chunks.sort((a, b) => b.keywordCount - a.keywordCount);
+      const selectedChunks = chunks.slice(0, Math.floor(MAX_DOCUMENT_LENGTH / chunkSize));
+      selectedChunks.sort((a, b) => a.position - b.position);
+      
+      processedText = selectedChunks.map(chunk => chunk.text).join('\n');
+      
+      if (processedText.length > MAX_DOCUMENT_LENGTH) {
+        processedText = processedText.substring(0, MAX_DOCUMENT_LENGTH);
+      }
+      
       documentWasTruncated = true;
-      console.log(`Smart truncation applied at position ${bestTruncationPoint}`);
+      console.log(`Smart truncation applied, final length: ${processedText.length}`);
     }
 
     // Get questionnaire with enhanced error handling and debugging
     console.log('Fetching comprehensive questionnaire (up to 265 questions)...');
     checkTimeout();
     const questionnaireData = await getQuestionnaire(supabaseClient);
-    console.log('Questionnaire structure:', JSON.stringify(questionnaireData, null, 2).substring(0, 1000));
+    console.log('Questionnaire structure preview:', JSON.stringify({
+      hasQuestionnaire: !!questionnaireData?.questionnaire,
+      sections: questionnaireData?.questionnaire?.sections?.length || 0,
+      metadata: questionnaireData?.metadata
+    }, null, 2));
     
     // Count total questions for logging
     let totalQuestions = 0;
@@ -112,18 +129,22 @@ serve(async (req) => {
     }
     console.log(`Questionnaire loaded with ${totalQuestions} total questions`);
     
+    if (totalQuestions === 0) {
+      throw new Error('No questions found in questionnaire. Please check questionnaire upload.');
+    }
+    
     // Enhanced document chunking with better overlap strategy for comprehensive assessment
     console.log('Creating document chunks with enhanced strategy for comprehensive assessment...');
-    const documentChunks = createDocumentChunks(processedText, 3000, 500); // Larger chunks for better context
+    const documentChunks = createDocumentChunks(processedText, 4000, 800); // Larger chunks with more overlap
     
     const chunksToProcess = documentChunks.slice(0, MAX_CHUNKS);
     console.log(`Created ${documentChunks.length} chunks, processing ${chunksToProcess.length}`);
-    console.log('Sample chunk preview:', chunksToProcess[0]?.substring(0, 200) + '...');
+    console.log('Sample chunk preview:', chunksToProcess[0]?.substring(0, 300) + '...');
 
     checkTimeout();
 
     // Enhanced comprehensive assessment processing
-    console.log(`Starting comprehensive AI assessment v3.0 for ${totalQuestions} questions...`);
+    console.log(`Starting enhanced AI assessment v4.0 for ${totalQuestions} questions...`);
     const assessmentResults = await processAssessment(
       questionnaireData,
       chunksToProcess,
@@ -131,7 +152,7 @@ serve(async (req) => {
       checkTimeout,
       documentWasTruncated
     );
-    console.log('Comprehensive AI assessment completed successfully');
+    console.log('Enhanced AI assessment completed successfully');
     console.log('Assessment summary:', {
       overallResult: assessmentResults.overallResult,
       credibilityScore: assessmentResults.credibilityScore,
@@ -144,16 +165,16 @@ serve(async (req) => {
     checkTimeout();
 
     // Enhanced assessment report storage
-    console.log('Saving comprehensive assessment report...');
+    console.log('Saving enhanced assessment report...');
     const reportData = await saveAssessmentReport(
       supabaseClient,
       userId,
       document,
       assessmentResults,
       assessmentResults.credibilityScore,
-      questionnaireData.metadata?.version || '3.0'
+      questionnaireData.metadata?.version || '4.0'
     );
-    console.log(`Comprehensive assessment report saved with ID: ${reportData.id}`);
+    console.log(`Enhanced assessment report saved with ID: ${reportData.id}`);
 
     // Update document status
     console.log('Updating document status...');
@@ -161,7 +182,7 @@ serve(async (req) => {
     console.log('Document status updated');
 
     const processingTime = Date.now() - startTime;
-    console.log(`=== Comprehensive 265-question assessment v3.0 completed successfully in ${processingTime}ms ===`);
+    console.log(`=== Enhanced 265-question assessment v4.0 completed successfully in ${processingTime}ms ===`);
 
     // Enhanced response with comprehensive metadata
     return new Response(
@@ -181,7 +202,7 @@ serve(async (req) => {
         overallResult: assessmentResults.overallResult,
         redFlagTriggered: assessmentResults.redFlagTriggered,
         reasoning: assessmentResults.reasoning,
-        version: '3.0'
+        version: '4.0'
       }),
       {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -190,7 +211,7 @@ serve(async (req) => {
 
   } catch (error: any) {
     const processingTime = Date.now() - startTime;
-    console.error('Error in comprehensive assess-document v3.0:', error);
+    console.error('Error in enhanced assess-document v4.0:', error);
     console.error('Error stack:', error.stack);
     console.error(`Failed after ${processingTime}ms`);
     
@@ -199,13 +220,13 @@ serve(async (req) => {
     let errorCode = 'PROCESSING_ERROR';
     
     if (error.message.includes('timeout') || processingTime > MAX_PROCESSING_TIME) {
-      errorMessage = 'Comprehensive assessment timed out. The 265-question assessment may require more time. Please try again or contact support.';
+      errorMessage = 'Enhanced assessment timed out. The 265-question assessment requires significant processing time. Please try again or contact support.';
       errorCode = 'TIMEOUT_ERROR';
     } else if (error.message.includes('Rate limit') || error.message.includes('429')) {
-      errorMessage = 'AI service is experiencing high demand during comprehensive assessment. Please wait a few minutes and try again.';
+      errorMessage = 'AI service is experiencing high demand during enhanced assessment. Please wait a few minutes and try again.';
       errorCode = 'RATE_LIMIT_ERROR';
-    } else if (error.message.includes('questionnaire') || error.message.includes('sections')) {
-      errorMessage = 'There was an issue with the comprehensive questionnaire. Please ensure the 265-question questionnaire is properly uploaded.';
+    } else if (error.message.includes('questionnaire') || error.message.includes('sections') || error.message.includes('No questions found')) {
+      errorMessage = 'There was an issue with the comprehensive questionnaire. Please ensure the 265-question questionnaire is properly uploaded and active.';
       errorCode = 'QUESTIONNAIRE_ERROR';
     } else if (error.message.includes('MISTRAL_API_KEY')) {
       errorMessage = 'AI service configuration error. Please contact support.';
@@ -214,7 +235,7 @@ serve(async (req) => {
       errorMessage = 'Document text could not be extracted. Please ensure the document is properly formatted and try uploading again.';
       errorCode = 'DOCUMENT_ERROR';
     } else if (error.message.includes('fetch') || error.message.includes('network')) {
-      errorMessage = 'Network error while connecting to AI service during comprehensive assessment. Please check your connection and try again.';
+      errorMessage = 'Network error while connecting to AI service during enhanced assessment. Please check your connection and try again.';
       errorCode = 'NETWORK_ERROR';
     }
     
@@ -225,7 +246,7 @@ serve(async (req) => {
         processingTime,
         success: false,
         details: error.message,
-        version: '3.0'
+        version: '4.0'
       }),
       {
         status: 500,
