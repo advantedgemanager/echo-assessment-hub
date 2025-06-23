@@ -1,34 +1,31 @@
 
 {
   "version": "1.0",
-  "title": "Complete Transition Plan Credibility Assessment",
-  "description": "Comprehensive questionnaire for evaluating organizational transition plans",
+  "title": "Transition Plan Credibility Assessment",
+  "description": "Comprehensive assessment tool for evaluating the credibility of organizational transition plans",
   "sections": [
     {
       "id": "section_1_red_flags",
-      "title": "Section 1 - Red Flag Questions",
-      "description": "Critical questions that can override all other scores",
+      "title": "Red Flag Questions",
+      "description": "Critical questions that if answered 'No' result in Misaligned rating",
       "questions": [
         {
           "id": "1",
-          "question_text": "Does the transition plan include a clear timeline with specific milestones?",
-          "section": "section_1_red_flags",
+          "question_text": "Does the organization have a documented net-zero transition strategy?",
           "score_yes": 1,
           "score_no": 0,
           "score_na": 0
         },
         {
           "id": "2", 
-          "question_text": "Are key stakeholders clearly identified and engaged in the transition process?",
-          "section": "section_1_red_flags",
+          "question_text": "Has the organization set science-based targets for emissions reduction?",
           "score_yes": 1,
           "score_no": 0,
           "score_na": 0
         },
         {
           "id": "3",
-          "question_text": "Is there evidence of leadership commitment and support for the transition?",
-          "section": "section_1_red_flags", 
+          "question_text": "Does the organization disclose its current greenhouse gas emissions baseline?",
           "score_yes": 1,
           "score_no": 0,
           "score_na": 0
@@ -37,37 +34,40 @@
     },
     {
       "id": "section_2_accountability",
-      "title": "Section 2 - Accountability",
+      "title": "Accountability",
       "description": "Questions that determine the base credibility score",
       "questions": [
         {
           "id": "4",
-          "question_text": "Are roles and responsibilities clearly defined for all team members?",
-          "section": "section_2_accountability",
+          "question_text": "Are there clear governance structures overseeing the transition plan?",
           "score_yes": 1,
           "score_no": 0,
           "score_na": 0
         },
         {
           "id": "5",
-          "question_text": "Is there a designated transition leader or team responsible for oversight?",
-          "section": "section_2_accountability",
+          "question_text": "Does the organization report progress against transition targets regularly?",
           "score_yes": 1,
           "score_no": 0,
           "score_na": 0
         },
         {
           "id": "6",
-          "question_text": "Are accountability mechanisms and reporting structures established?",
-          "section": "section_2_accountability",
+          "question_text": "Are executive compensation packages linked to climate performance?",
           "score_yes": 1,
           "score_no": 0,
           "score_na": 0
         },
         {
           "id": "7",
-          "question_text": "Is there a process for monitoring progress and making adjustments?",
-          "section": "section_2_accountability",
+          "question_text": "Has the organization established interim milestones toward its net-zero target?",
+          "score_yes": 1,
+          "score_no": 0,
+          "score_na": 0
+        },
+        {
+          "id": "8",
+          "question_text": "Does the organization have third-party verification of its emissions data?",
           "score_yes": 1,
           "score_no": 0,
           "score_na": 0
@@ -76,29 +76,33 @@
     },
     {
       "id": "section_3_depth",
-      "title": "Section 3 - Depth",
-      "description": "Questions assessing the thoroughness of the transition plan",
+      "title": "Depth of Planning",
+      "description": "Questions assessing the comprehensiveness of the transition plan",
       "questions": [
         {
-          "id": "8",
-          "question_text": "Does the plan include detailed risk assessment and mitigation strategies?",
-          "section": "section_3_depth",
-          "score_yes": 1,
-          "score_no": 0,
-          "score_na": 0
-        },
-        {
           "id": "9",
-          "question_text": "Are resource requirements clearly identified and allocated?",
-          "section": "section_3_depth",
+          "question_text": "Does the plan include detailed sector-specific decarbonization pathways?",
           "score_yes": 1,
           "score_no": 0,
           "score_na": 0
         },
         {
           "id": "10",
-          "question_text": "Is there evidence of stakeholder analysis and engagement planning?",
-          "section": "section_3_depth",
+          "question_text": "Are technology deployment scenarios clearly outlined?",
+          "score_yes": 1,
+          "score_no": 0,
+          "score_na": 0
+        },
+        {
+          "id": "11",
+          "question_text": "Does the plan address potential risks and mitigation strategies?",
+          "score_yes": 1,
+          "score_no": 0,
+          "score_na": 0
+        },
+        {
+          "id": "12",
+          "question_text": "Are capital allocation plans aligned with transition objectives?",
           "score_yes": 1,
           "score_no": 0,
           "score_na": 0
@@ -107,29 +111,33 @@
     },
     {
       "id": "section_4_action",
-      "title": "Section 4 - Action",
-      "description": "Questions evaluating actionable elements of the transition plan",
+      "title": "Action and Implementation",
+      "description": "Questions evaluating concrete implementation measures",
       "questions": [
         {
-          "id": "11",
-          "question_text": "Are specific actions and tasks clearly outlined with deadlines?",
-          "section": "section_4_action",
-          "score_yes": 1,
-          "score_no": 0,
-          "score_na": 0
-        },
-        {
-          "id": "12",
-          "question_text": "Is there evidence of implementation planning and execution strategies?",
-          "section": "section_4_action",
-          "score_yes": 1,
-          "score_no": 0,
-          "score_na": 0
-        },
-        {
           "id": "13",
-          "question_text": "Are success metrics and evaluation criteria defined?",
-          "section": "section_4_action",
+          "question_text": "Has the organization begun implementing specific transition initiatives?",
+          "score_yes": 1,
+          "score_no": 0,
+          "score_na": 0
+        },
+        {
+          "id": "14",
+          "question_text": "Are there dedicated resources (budget, personnel) allocated to the transition?",
+          "score_yes": 1,
+          "score_no": 0,
+          "score_na": 0
+        },
+        {
+          "id": "15",
+          "question_text": "Does the organization have partnerships or collaborations supporting the transition?",
+          "score_yes": 1,
+          "score_no": 0,
+          "score_na": 0
+        },
+        {
+          "id": "16",
+          "question_text": "Are there measurable actions planned for the next 12-24 months?",
           "score_yes": 1,
           "score_no": 0,
           "score_na": 0

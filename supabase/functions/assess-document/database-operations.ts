@@ -1,4 +1,3 @@
-
 export const getDocument = async (supabaseClient: any, documentId: string, userId: string) => {
   const { data: document, error: docError } = await supabaseClient
     .from('uploaded_documents')
@@ -21,18 +20,37 @@ export const getDocument = async (supabaseClient: any, documentId: string, userI
 export const getQuestionnaire = async (supabaseClient: any) => {
   console.log('Fetching embedded questionnaire...');
   
-  const questionnaireResponse = await supabaseClient.functions.invoke('questionnaire-manager', {
-    body: { action: 'retrieve' }
-  });
+  try {
+    const questionnaireResponse = await supabaseClient.functions.invoke('questionnaire-manager', {
+      body: { action: 'retrieve' }
+    });
 
-  console.log('Questionnaire response received');
+    console.log('Questionnaire response received');
 
-  if (questionnaireResponse.error || !questionnaireResponse.data) {
-    console.error('Failed to retrieve questionnaire:', questionnaireResponse.error);
-    throw new Error('Failed to retrieve embedded questionnaire');
+    if (questionnaireResponse.error) {
+      console.error('Questionnaire function error:', questionnaireResponse.error);
+      throw new Error(`Failed to retrieve questionnaire: ${questionnaireResponse.error.message}`);
+    }
+
+    if (!questionnaireResponse.data) {
+      console.error('No questionnaire data received');
+      throw new Error('No questionnaire data received from function');
+    }
+
+    // Validate the questionnaire structure
+    const data = questionnaireResponse.data;
+    if (!data.questionnaire || !data.questionnaire.sections) {
+      console.error('Invalid questionnaire structure:', data);
+      throw new Error('Invalid questionnaire structure received');
+    }
+
+    console.log(`Questionnaire loaded with ${data.questionnaire.sections.length} sections`);
+    return data;
+
+  } catch (error) {
+    console.error('Failed to retrieve questionnaire:', error);
+    throw new Error(`Failed to retrieve embedded questionnaire: ${error.message}`);
   }
-
-  return questionnaireResponse.data;
 };
 
 export const saveAssessmentReport = async (
