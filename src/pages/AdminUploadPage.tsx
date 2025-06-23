@@ -72,6 +72,8 @@ const AdminUploadPage = () => {
     setErrorMessage('');
 
     try {
+      console.log('Starting upload process...');
+      
       // Read and parse the JSON file
       const fileContent = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
@@ -80,19 +82,26 @@ const AdminUploadPage = () => {
         reader.readAsText(file);
       });
 
+      console.log('File read successfully, parsing JSON...');
+
       let questionnaireData;
       try {
         questionnaireData = JSON.parse(fileContent);
+        console.log('JSON parsed successfully');
       } catch (parseError) {
+        console.error('JSON parse error:', parseError);
         throw new Error('Invalid JSON format');
       }
 
       // Validate the structure
+      console.log('Validating questionnaire structure...');
       if (!validateQuestionnaireStructure(questionnaireData)) {
         setUploadStatus('error');
         setIsUploading(false);
         return;
       }
+
+      console.log('Structure validation passed, uploading to server...');
 
       // Upload using the utility function
       const success = await uploadCredibilityQuestionnaire(
@@ -102,6 +111,7 @@ const AdminUploadPage = () => {
       );
 
       if (success) {
+        console.log('Upload successful!');
         setUploadStatus('success');
         toast({
           title: 'Upload Successful',
@@ -216,6 +226,7 @@ const AdminUploadPage = () => {
             <li>• The file will be validated before upload</li>
             <li>• Once uploaded, the questionnaire becomes active for AI assessments</li>
             <li>• Previous versions will be automatically deactivated</li>
+            <li>• Check the browser console for detailed error messages if upload fails</li>
           </ul>
         </div>
       </div>
