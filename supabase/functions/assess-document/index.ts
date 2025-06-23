@@ -18,10 +18,10 @@ const corsHeaders = {
 
 const mistralApiKey = Deno.env.get('MISTRAL_API_KEY');
 
-// Resource limits
-const MAX_PROCESSING_TIME = 4 * 60 * 1000; // 4 minutes
-const MAX_DOCUMENT_LENGTH = 100000; // 100k characters max for assessment
-const MAX_CHUNKS = 20; // Limit number of chunks to process
+// Increased resource limits
+const MAX_PROCESSING_TIME = 6 * 60 * 1000; // Increased to 6 minutes
+const MAX_DOCUMENT_LENGTH = 120000; // Increased to 120k characters
+const MAX_CHUNKS = 25; // Increased chunk limit
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -31,7 +31,7 @@ serve(async (req) => {
   const startTime = Date.now();
   
   try {
-    console.log('=== Starting document assessment ===');
+    console.log('=== Starting document assessment with improved error handling ===');
     
     const supabaseClient = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
@@ -49,10 +49,10 @@ serve(async (req) => {
       throw new Error('MISTRAL_API_KEY environment variable is not set');
     }
 
-    // Check elapsed time periodically
+    // Check elapsed time periodically with increased tolerance
     const checkTimeout = () => {
       if (Date.now() - startTime > MAX_PROCESSING_TIME) {
-        throw new Error('Processing timeout - document too large or complex');
+        throw new Error('Processing timeout - document assessment taking too long');
       }
     };
 
@@ -80,7 +80,7 @@ serve(async (req) => {
     
     // Split document into manageable chunks
     console.log('Creating document chunks...');
-    const documentChunks = createDocumentChunks(document.document_text, 1500, 150); // Smaller chunks
+    const documentChunks = createDocumentChunks(document.document_text, 1800, 200); // Slightly larger chunks
     
     // Limit number of chunks to process
     const chunksToProcess = documentChunks.slice(0, MAX_CHUNKS);
@@ -88,15 +88,15 @@ serve(async (req) => {
 
     checkTimeout();
 
-    // Process the assessment with timeout checks
-    console.log('Starting AI assessment...');
+    // Process the assessment with improved error handling
+    console.log('Starting AI assessment with rate limiting...');
     const assessmentResults = await processAssessment(
       questionnaireData,
       chunksToProcess,
       mistralApiKey,
       checkTimeout
     );
-    console.log('AI assessment completed');
+    console.log('AI assessment completed successfully');
 
     checkTimeout();
 
@@ -143,26 +143,33 @@ serve(async (req) => {
     console.error('Error stack:', error.stack);
     console.error(`Failed after ${processingTime}ms`);
     
-    // Determine error type for better user feedback
+    // Improved error categorization for better user feedback
     let errorMessage = error.message;
     let errorCode = 'PROCESSING_ERROR';
     
     if (error.message.includes('timeout') || processingTime > MAX_PROCESSING_TIME) {
-      errorMessage = 'Document assessment timed out. The document may be too large or complex. Please try with a smaller document.';
+      errorMessage = 'Document assessment timed out. The document may be too large or complex. Please try with a smaller document or contact support.';
       errorCode = 'TIMEOUT_ERROR';
+    } else if (error.message.includes('Rate limit') || error.message.includes('429')) {
+      errorMessage = 'AI service is currently experiencing high demand. Please wait a moment and try again.';
+      errorCode = 'RATE_LIMIT_ERROR';
     } else if (error.message.includes('not iterable') || error.message.includes('sections')) {
-      errorMessage = 'There was an issue with the assessment questionnaire. Please try again or contact support.';
+      errorMessage = 'There was an issue with the assessment questionnaire configuration. Please contact support.';
       errorCode = 'QUESTIONNAIRE_ERROR';
     } else if (error.message.includes('MISTRAL_API_KEY')) {
       errorMessage = 'AI service configuration error. Please contact support.';
       errorCode = 'CONFIG_ERROR';
+    } else if (error.message.includes('Invalid questionnaire format')) {
+      errorMessage = 'Assessment questionnaire format error. Please contact support.';
+      errorCode = 'QUESTIONNAIRE_FORMAT_ERROR';
     }
     
     return new Response(
       JSON.stringify({ 
         error: errorMessage,
         errorCode,
-        processingTime
+        processingTime,
+        success: false
       }),
       {
         status: 500,

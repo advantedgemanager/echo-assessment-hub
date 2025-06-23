@@ -1,4 +1,3 @@
-
 import { evaluateQuestionAgainstChunks, QuestionEvaluation } from './ai-evaluator.ts';
 
 export interface SectionResult {
@@ -28,7 +27,7 @@ export const processAssessment = async (
   mistralApiKey: string,
   checkTimeout?: () => void
 ): Promise<AssessmentResults> => {
-  console.log('Starting new assessment with embedded questionnaire logic');
+  console.log('Starting assessment with improved rate limiting and error handling');
   
   // Extract the questionnaire from the nested structure
   let questionnaire = questionnaireData;
@@ -40,13 +39,13 @@ export const processAssessment = async (
     throw new Error('Invalid questionnaire format: no sections found');
   }
 
-  console.log(`Processing ${questionnaire.sections.length} sections with new methodology`);
+  console.log(`Processing ${questionnaire.sections.length} sections with improved methodology`);
   
   const sectionResults: SectionResult[] = [];
   let totalScore = 0;
   let maxPossibleScore = 0;
   let questionsProcessed = 0;
-  const maxQuestionsToProcess = 20; // Reduced for efficiency
+  const maxQuestionsToProcess = 25; // Slightly increased limit
 
   // Process each section
   for (const section of questionnaire.sections) {
@@ -64,10 +63,12 @@ export const processAssessment = async (
     let sectionNoCount = 0;
     let sectionNaCount = 0;
     
-    // Process questions in the section
-    for (const question of section.questions) {
+    // Process questions in smaller batches to avoid overwhelming the API
+    const questionsToProcess = section.questions.slice(0, Math.min(section.questions.length, 8)); // Limit per section
+    
+    for (const question of questionsToProcess) {
       if (questionsProcessed >= maxQuestionsToProcess) {
-        console.warn(`Reached maximum question limit, stopping processing`);
+        console.log(`Reached maximum question limit (${maxQuestionsToProcess}), stopping processing`);
         break;
       }
       
@@ -80,7 +81,7 @@ export const processAssessment = async (
           {
             id: question.id,
             text: question.question_text,
-            weight: 1 // All questions have equal weight in new methodology
+            weight: 1 // All questions have equal weight
           },
           documentChunks,
           mistralApiKey
@@ -108,7 +109,8 @@ export const processAssessment = async (
         
       } catch (questionError) {
         console.error(`Error processing question ${question.id}:`, questionError);
-        // Add fallback evaluation
+        
+        // Add fallback evaluation for failed questions
         const fallbackEvaluation: QuestionEvaluation = {
           questionId: question.id,
           questionText: question.question_text,
@@ -138,15 +140,18 @@ export const processAssessment = async (
       yesPercentage
     });
     
+    console.log(`Section ${section.title} completed: ${sectionYesCount}/${totalSectionQuestions} yes responses (${yesPercentage}%)`);
+    
     if (questionsProcessed >= maxQuestionsToProcess) {
       break;
     }
   }
 
-  // Apply new scoring methodology
+  // Apply scoring methodology
   const assessmentResult = calculateOverallResult(sectionResults);
   
   console.log(`Assessment completed with result: ${assessmentResult.overallResult}`);
+  console.log(`Total questions processed: ${questionsProcessed}`);
   console.log(`Red flag triggered: ${assessmentResult.redFlagTriggered}`);
   console.log(`Reasoning: ${assessmentResult.reasoning}`);
 

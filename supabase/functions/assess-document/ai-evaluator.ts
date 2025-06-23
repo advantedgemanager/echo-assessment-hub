@@ -7,8 +7,16 @@ export interface QuestionEvaluation {
   weight: number;
 }
 
-const API_TIMEOUT = 30000; // 30 seconds per API call
-const MAX_RETRIES = 2;
+const API_TIMEOUT = 45000; // Increased to 45 seconds
+const MAX_RETRIES = 3; // Increased retries
+const RATE_LIMIT_DELAY = 2000; // 2 seconds between requests
+const MAX_CONCURRENT_REQUESTS = 2; // Limit concurrent requests
+
+// Simple delay function for rate limiting
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+// Exponential backoff for retries
+const getBackoffDelay = (attempt: number) => Math.min(1000 * Math.pow(2, attempt), 10000);
 
 export const evaluateQuestionAgainstChunks = async (
   question: any,
@@ -17,16 +25,30 @@ export const evaluateQuestionAgainstChunks = async (
 ): Promise<QuestionEvaluation> => {
   let bestResponse: 'Yes' | 'No' | 'Not enough information' = 'Not enough information';
   let successfulCalls = 0;
-  const maxChunksToProcess = Math.min(documentChunks.length, 5); // Limit chunks per question
+  const maxChunksToProcess = Math.min(documentChunks.length, 3); // Reduced chunks per question
   
   console.log(`Evaluating question ${question.id} against ${maxChunksToProcess} chunks`);
   
-  // Evaluate question against a limited number of document chunks
+  // Process chunks sequentially to avoid rate limiting
   for (let i = 0; i < maxChunksToProcess; i++) {
     const chunk = documentChunks[i];
     
+    // Add delay between requests to avoid rate limiting
+    if (i > 0) {
+      await delay(RATE_LIMIT_DELAY);
+    }
+    
+    let lastError: Error | null = null;
+    
     for (let retry = 0; retry < MAX_RETRIES; retry++) {
       try {
+        // Exponential backoff for retries
+        if (retry > 0) {
+          const backoffDelay = getBackoffDelay(retry);
+          console.log(`Retrying chunk ${i + 1} for question ${question.id} after ${backoffDelay}ms delay`);
+          await delay(backoffDelay);
+        }
+        
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT);
         
@@ -45,7 +67,7 @@ export const evaluateQuestionAgainstChunks = async (
               },
               {
                 role: 'user',
-                content: `QUESTION: ${question.text}\n\nDOCUMENT EXCERPT: ${chunk.substring(0, 1500)}` // Limit chunk size
+                content: `QUESTION: ${question.text}\n\nDOCUMENT EXCERPT: ${chunk.substring(0, 1200)}` // Reduced chunk size
               }
             ],
             max_tokens: 10,
@@ -55,6 +77,10 @@ export const evaluateQuestionAgainstChunks = async (
         });
 
         clearTimeout(timeoutId);
+
+        if (response.status === 429) {
+          throw new Error('Rate limit exceeded');
+        }
 
         if (!response.ok) {
           throw new Error(`API responded with status: ${response.status}`);
@@ -91,15 +117,17 @@ export const evaluateQuestionAgainstChunks = async (
         break;
         
       } catch (error) {
+        lastError = error as Error;
         console.error(`Error processing chunk ${i + 1} for question ${question.id} (retry ${retry + 1}):`, error);
         
-        if (retry === MAX_RETRIES - 1) {
-          console.warn(`Failed to process chunk ${i + 1} after ${MAX_RETRIES} retries`);
+        // If it's a rate limit error, wait longer before retrying
+        if (error.message.includes('429') || error.message.includes('Rate limit')) {
+          await delay(5000 + (retry * 2000)); // Longer delay for rate limits
         }
         
-        // If it's an abort error (timeout), don't retry
+        // If it's an abort error (timeout), don't retry immediately
         if (error.name === 'AbortError') {
-          break;
+          await delay(1000);
         }
       }
     }
@@ -110,7 +138,7 @@ export const evaluateQuestionAgainstChunks = async (
     }
     
     // If we've had too many failures, stop processing more chunks
-    if (successfulCalls === 0 && i >= 2) {
+    if (successfulCalls === 0 && i >= 1) {
       console.warn(`No successful API calls after processing ${i + 1} chunks, stopping`);
       break;
     }
