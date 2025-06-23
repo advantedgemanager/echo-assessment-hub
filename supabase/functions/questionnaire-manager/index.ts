@@ -37,9 +37,13 @@ serve(async (req) => {
           throw new Error('Invalid questionnaire format: missing required sections');
         }
 
+        // Use the version parameter directly from request, with fallback
+        const finalVersion = version || questionnaire.metadata.version || '1.0';
+        console.log(`Using version: ${finalVersion}`);
+
         // Transform the uploaded structure to match the expected format
         const transformedQuestionnaire = {
-          version: version || questionnaire.metadata.version || '1.0',
+          version: finalVersion,
           title: questionnaire.metadata.title || 'Transition Plan Credibility Assessment',
           description: questionnaire.metadata.description || description || 'Credibility assessment questionnaire',
           sections: []
@@ -59,6 +63,12 @@ serve(async (req) => {
 
         console.log(`Transformed questionnaire with ${transformedQuestionnaire.sections.length} sections`);
 
+        // Construct file metadata with proper fallbacks
+        const fileName = `questionnaire_v${finalVersion}.json`;
+        const filePath = `/questionnaires/v${finalVersion}`;
+        
+        console.log(`File metadata - name: ${fileName}, path: ${filePath}`);
+
         // Deactivate all existing questionnaires
         await supabase
           .from('questionnaire_metadata')
@@ -69,9 +79,9 @@ serve(async (req) => {
         const { data: insertData, error: insertError } = await supabase
           .from('questionnaire_metadata')
           .insert({
-            file_name: `questionnaire_v${transformedQuestionnaire.version}.json`,
-            file_path: `/questionnaires/v${transformedQuestionnaire.version}`,
-            version: transformedQuestionnaire.version,
+            file_name: fileName,
+            file_path: filePath,
+            version: finalVersion,
             description: transformedQuestionnaire.description,
             questionnaire_data: transformedQuestionnaire,
             is_active: true
