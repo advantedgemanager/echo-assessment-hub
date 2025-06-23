@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -94,7 +93,7 @@ const DetailedAssessmentSummary: React.FC<DetailedAssessmentSummaryProps> = ({
         if (error) throw error;
 
         // Type guard to ensure assessment_data has the expected structure
-        const assessmentData = report.assessment_data as AssessmentData;
+        const assessmentData = report.assessment_data as unknown as AssessmentData;
         
         if (!assessmentData || !assessmentData.sections || !Array.isArray(assessmentData.sections)) {
           throw new Error('Invalid assessment data structure');
