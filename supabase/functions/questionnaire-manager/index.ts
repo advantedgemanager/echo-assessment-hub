@@ -1,6 +1,7 @@
 
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -13,26 +14,139 @@ serve(async (req) => {
   }
 
   try {
-    const { action } = await req.json();
+    const { action, questionnaire_data, version, description } = await req.json();
     console.log(`Request method: ${req.method} Action: ${action}`);
 
-    if (action === 'retrieve') {
-      console.log('Loading embedded questionnaire...');
+    // Initialize Supabase client
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+    if (action === 'upload') {
+      console.log('Processing questionnaire upload...');
       
       try {
-        // Read the embedded questionnaire file
+        // Validate the questionnaire structure
+        if (!questionnaire_data || !questionnaire_data.transition_plan_questionnaire) {
+          throw new Error('Invalid questionnaire format: missing transition_plan_questionnaire');
+        }
+
+        const questionnaire = questionnaire_data.transition_plan_questionnaire;
+        
+        if (!questionnaire.metadata || !questionnaire.basic_assessment_sections) {
+          throw new Error('Invalid questionnaire format: missing required sections');
+        }
+
+        // Transform the uploaded structure to match the expected format
+        const transformedQuestionnaire = {
+          version: version || questionnaire.metadata.version || '1.0',
+          title: questionnaire.metadata.title || 'Transition Plan Credibility Assessment',
+          description: questionnaire.metadata.description || description || 'Credibility assessment questionnaire',
+          sections: []
+        };
+
+        // Transform sections
+        const sections = questionnaire.basic_assessment_sections;
+        for (const sectionKey of Object.keys(sections)) {
+          const section = sections[sectionKey];
+          transformedQuestionnaire.sections.push({
+            id: sectionKey,
+            title: section.title,
+            description: section.description,
+            questions: section.questions
+          });
+        }
+
+        console.log(`Transformed questionnaire with ${transformedQuestionnaire.sections.length} sections`);
+
+        // Deactivate all existing questionnaires
+        await supabase
+          .from('questionnaire_metadata')
+          .update({ is_active: false })
+          .neq('id', '00000000-0000-0000-0000-000000000000');
+
+        // Insert the new questionnaire
+        const { data: insertData, error: insertError } = await supabase
+          .from('questionnaire_metadata')
+          .insert({
+            version: transformedQuestionnaire.version,
+            description: transformedQuestionnaire.description,
+            questionnaire_data: transformedQuestionnaire,
+            is_active: true
+          })
+          .select()
+          .single();
+
+        if (insertError) {
+          console.error('Database insert error:', insertError);
+          throw new Error(`Failed to save questionnaire: ${insertError.message}`);
+        }
+
+        console.log('Questionnaire uploaded successfully:', insertData.id);
+
+        return new Response(JSON.stringify({ 
+          success: true, 
+          questionnaire_id: insertData.id,
+          message: 'Questionnaire uploaded and activated successfully'
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+
+      } catch (uploadError) {
+        console.error('Error processing upload:', uploadError);
+        return new Response(
+          JSON.stringify({ error: uploadError.message }),
+          {
+            status: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          }
+        );
+      }
+    }
+
+    if (action === 'retrieve') {
+      console.log('Retrieving questionnaire...');
+      
+      try {
+        // First try to get active questionnaire from database
+        const { data: activeQuestionnaire, error: dbError } = await supabase
+          .from('questionnaire_metadata')
+          .select('*')
+          .eq('is_active', true)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single();
+
+        if (!dbError && activeQuestionnaire) {
+          console.log('Found active questionnaire in database');
+          const response = {
+            questionnaire: activeQuestionnaire.questionnaire_data,
+            metadata: {
+              version: activeQuestionnaire.version,
+              uploaded_at: activeQuestionnaire.created_at,
+              description: activeQuestionnaire.description
+            }
+          };
+
+          return new Response(JSON.stringify(response), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+
+        console.log('No active questionnaire in database, loading embedded questionnaire...');
+        
+        // Fallback to embedded questionnaire
         const questionnaireText = await Deno.readTextFile('./complete_transition_questionnaire.json');
         const questionnaireData = JSON.parse(questionnaireText);
         
         console.log('Embedded questionnaire loaded successfully');
         
-        // Return the questionnaire with metadata
         const response = {
           questionnaire: questionnaireData,
           metadata: {
             version: questionnaireData.version || '1.0',
             uploaded_at: new Date().toISOString(),
-            description: questionnaireData.description || 'Transition Plan Credibility Assessment'
+            description: questionnaireData.description || 'Embedded transition plan questionnaire'
           }
         };
 
@@ -40,10 +154,10 @@ serve(async (req) => {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
         
-      } catch (fileError) {
-        console.error('Error loading embedded questionnaire:', fileError);
+      } catch (retrieveError) {
+        console.error('Error retrieving questionnaire:', retrieveError);
         
-        // Fallback: return a basic questionnaire structure if file not found
+        // Final fallback: return a basic questionnaire structure
         const fallbackQuestionnaire = {
           version: "1.0",
           title: "Transition Plan Credibility Assessment",
@@ -61,19 +175,6 @@ serve(async (req) => {
                   score_na: 0
                 }
               ]
-            },
-            {
-              id: "section_2_accountability",
-              title: "Accountability",
-              questions: [
-                {
-                  id: "2",
-                  question_text: "Are there clear accountability measures in place?",
-                  score_yes: 1,
-                  score_no: 0,
-                  score_na: 0
-                }
-              ]
             }
           ]
         };
@@ -83,7 +184,7 @@ serve(async (req) => {
           metadata: {
             version: '1.0',
             uploaded_at: new Date().toISOString(),
-            description: 'Fallback questionnaire due to file loading error'
+            description: 'Fallback questionnaire due to loading error'
           }
         };
 
@@ -94,7 +195,7 @@ serve(async (req) => {
     }
 
     return new Response(
-      JSON.stringify({ error: 'Invalid action' }),
+      JSON.stringify({ error: 'Invalid action. Supported actions: retrieve, upload' }),
       {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
