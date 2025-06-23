@@ -34,6 +34,23 @@ interface SectionStats {
   yesPercentage: number;
 }
 
+interface AssessmentData {
+  sections: Array<{
+    sectionId: string;
+    sectionTitle: string;
+    questions: Array<{
+      questionId: string;
+      questionText: string;
+      response: string;
+      score: number;
+      weight: number;
+    }>;
+  }>;
+  totalScore: number;
+  maxPossibleScore: number;
+  questionnaire_version?: string;
+}
+
 const DetailedAssessmentSummary: React.FC<DetailedAssessmentSummaryProps> = ({
   credibilityScore,
   totalScore,
@@ -76,39 +93,48 @@ const DetailedAssessmentSummary: React.FC<DetailedAssessmentSummaryProps> = ({
 
         if (error) throw error;
 
-        const sections = report.assessment_data.sections || [];
+        // Type guard to ensure assessment_data has the expected structure
+        const assessmentData = report.assessment_data as AssessmentData;
+        
+        if (!assessmentData || !assessmentData.sections || !Array.isArray(assessmentData.sections)) {
+          throw new Error('Invalid assessment data structure');
+        }
+
+        const sections = assessmentData.sections;
         const allQuestions: QuestionResult[] = [];
         const stats: SectionStats[] = [];
 
-        sections.forEach((section: any) => {
+        sections.forEach((section) => {
           let yesCount = 0;
           let noCount = 0;
           let naCount = 0;
 
-          section.questions.forEach((q: any) => {
-            allQuestions.push({
-              questionId: q.questionId,
-              questionText: q.questionText,
-              response: q.response,
-              score: q.score,
-              weight: q.weight,
-              sectionTitle: section.sectionTitle
+          if (section.questions && Array.isArray(section.questions)) {
+            section.questions.forEach((q) => {
+              allQuestions.push({
+                questionId: q.questionId,
+                questionText: q.questionText,
+                response: q.response,
+                score: q.score,
+                weight: q.weight,
+                sectionTitle: section.sectionTitle
+              });
+
+              switch (q.response) {
+                case 'Yes':
+                  yesCount++;
+                  break;
+                case 'No':
+                  noCount++;
+                  break;
+                default:
+                  naCount++;
+                  break;
+              }
             });
+          }
 
-            switch (q.response) {
-              case 'Yes':
-                yesCount++;
-                break;
-              case 'No':
-                noCount++;
-                break;
-              default:
-                naCount++;
-                break;
-            }
-          });
-
-          const totalQuestions = section.questions.length;
+          const totalQuestions = section.questions ? section.questions.length : 0;
           stats.push({
             sectionTitle: section.sectionTitle,
             yesCount,
