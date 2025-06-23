@@ -5,12 +5,16 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { useAuth } from '@/contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import FileUpload from '@/components/FileUpload';
-import { Play, LogOut, FileText } from 'lucide-react';
+import AssessmentProgress from '@/components/AssessmentProgress';
+import AssessmentResults from '@/components/AssessmentResults';
+import { useAssessment } from '@/hooks/useAssessment';
+import { Play, LogOut, FileText, RotateCcw } from 'lucide-react';
 
 const Dashboard = () => {
   const [uploadedDocumentId, setUploadedDocumentId] = useState<string | null>(null);
   const { user, signOut, loading } = useAuth();
   const navigate = useNavigate();
+  const { assessmentState, startAssessment, resetAssessment } = useAssessment();
 
   useEffect(() => {
     if (!loading && !user) {
@@ -20,14 +24,19 @@ const Dashboard = () => {
 
   const handleUploadComplete = (documentId: string) => {
     setUploadedDocumentId(documentId);
+    // Reset any previous assessment
+    resetAssessment();
   };
 
-  const handleStartAssessment = () => {
-    if (uploadedDocumentId) {
-      console.log('Starting assessment for document:', uploadedDocumentId);
-      // TODO: Implement assessment logic
-      alert('Assessment feature will be implemented next!');
+  const handleStartAssessment = async () => {
+    if (uploadedDocumentId && user) {
+      await startAssessment(uploadedDocumentId, user.id);
     }
+  };
+
+  const handleStartNewAssessment = () => {
+    setUploadedDocumentId(null);
+    resetAssessment();
   };
 
   const handleSignOut = async () => {
@@ -68,47 +77,73 @@ const Dashboard = () => {
           <div className="text-center">
             <h2 className="text-3xl font-bold mb-4">Transition Plan Assessment</h2>
             <p className="text-xl text-muted-foreground">
-              Upload your transition plan document to begin the credibility assessment
+              Upload your transition plan document to begin the AI-powered credibility assessment
             </p>
           </div>
 
-          <div className="grid gap-8 md:grid-cols-2">
-            {/* File Upload Section */}
-            <div>
-              <FileUpload onUploadComplete={handleUploadComplete} />
+          {/* Show assessment results if completed */}
+          {assessmentState.status === 'completed' && assessmentState.results && (
+            <div className="space-y-6">
+              <AssessmentResults {...assessmentState.results} />
+              <div className="text-center">
+                <Button onClick={handleStartNewAssessment} variant="outline">
+                  <RotateCcw className="h-4 w-4 mr-2" />
+                  Start New Assessment
+                </Button>
+              </div>
             </div>
+          )}
 
-            {/* Assessment Action Section */}
-            <div>
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Play className="h-5 w-5" />
-                    Start Assessment
-                  </CardTitle>
-                  <CardDescription>
-                    Begin the AI-powered credibility assessment of your uploaded document
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <Button
-                    onClick={handleStartAssessment}
-                    disabled={!uploadedDocumentId}
-                    className="w-full"
-                    size="lg"
-                  >
-                    <FileText className="h-5 w-5 mr-2" />
-                    Start Assessment
-                  </Button>
-                  {!uploadedDocumentId && (
-                    <p className="text-sm text-muted-foreground mt-2 text-center">
-                      Please upload a document first
-                    </p>
-                  )}
-                </CardContent>
-              </Card>
+          {/* Show assessment progress if in progress */}
+          {(assessmentState.status === 'processing' || assessmentState.status === 'assessing' || assessmentState.status === 'error') && (
+            <AssessmentProgress
+              status={assessmentState.status}
+              progress={assessmentState.progress}
+              currentStep={assessmentState.currentStep}
+              error={assessmentState.error || undefined}
+            />
+          )}
+
+          {/* Show upload and assessment interface if not completed */}
+          {assessmentState.status !== 'completed' && (
+            <div className="grid gap-8 md:grid-cols-2">
+              {/* File Upload Section */}
+              <div>
+                <FileUpload onUploadComplete={handleUploadComplete} />
+              </div>
+
+              {/* Assessment Action Section */}
+              <div>
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Play className="h-5 w-5" />
+                      Start Assessment
+                    </CardTitle>
+                    <CardDescription>
+                      Begin the AI-powered credibility assessment of your uploaded document
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <Button
+                      onClick={handleStartAssessment}
+                      disabled={!uploadedDocumentId || assessmentState.status !== 'idle'}
+                      className="w-full"
+                      size="lg"
+                    >
+                      <FileText className="h-5 w-5 mr-2" />
+                      {assessmentState.status === 'idle' ? 'Start Assessment' : 'Assessment in Progress...'}
+                    </Button>
+                    {!uploadedDocumentId && assessmentState.status === 'idle' && (
+                      <p className="text-sm text-muted-foreground mt-2 text-center">
+                        Please upload a document first
+                      </p>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Instructions */}
           <Card>
@@ -119,8 +154,9 @@ const Dashboard = () => {
               <ol className="list-decimal list-inside space-y-2 text-sm">
                 <li>Upload your transition plan document (PDF or DOCX format)</li>
                 <li>Click "Start Assessment" to begin the AI analysis</li>
-                <li>The system will evaluate your plan against credibility criteria</li>
-                <li>Receive a detailed assessment report with recommendations</li>
+                <li>The system will extract text and evaluate your plan against credibility criteria</li>
+                <li>Each question is answered with "Yes", "No", or "Not enough information"</li>
+                <li>Receive a detailed assessment report with your credibility score</li>
                 <li>Your document will be permanently stored for future reference</li>
               </ol>
             </CardContent>

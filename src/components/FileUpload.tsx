@@ -55,8 +55,8 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
 
       if (uploadError) throw uploadError;
 
-      // Record the document in the database using type assertion
-      const { data: documentData, error: dbError } = await (supabase as any)
+      // Record the document in the database
+      const { data: documentData, error: dbError } = await supabase
         .from('uploaded_documents')
         .insert({
           user_id: user.id,
