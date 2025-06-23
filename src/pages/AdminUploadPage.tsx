@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -7,7 +7,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { uploadCredibilityQuestionnaire } from '@/utils/questionnaireUtils';
 import { useToast } from '@/hooks/use-toast';
-import { Upload, CheckCircle, AlertCircle } from 'lucide-react';
+import { Upload, CheckCircle, AlertCircle, Trash2 } from 'lucide-react';
 
 const AdminUploadPage = () => {
   const [file, setFile] = useState<File | null>(null);
@@ -17,6 +17,13 @@ const AdminUploadPage = () => {
   const [uploadStatus, setUploadStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState('');
   const { toast } = useToast();
+
+  // Clear any cached questionnaire data on component mount
+  useEffect(() => {
+    // Force a refresh of any cached questionnaire data
+    localStorage.removeItem('questionnaire-cache');
+    sessionStorage.removeItem('questionnaire-cache');
+  }, []);
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = event.target.files?.[0];
@@ -165,6 +172,15 @@ const AdminUploadPage = () => {
             Upload the credibility assessment questionnaire JSON file
           </p>
         </div>
+
+        {/* Clean state notification */}
+        <Alert className="mb-6">
+          <Trash2 className="h-4 w-4" />
+          <AlertDescription>
+            System has been reset. All previous questionnaires and assessment reports have been cleared. 
+            You can now upload a fresh questionnaire.
+          </AlertDescription>
+        </Alert>
 
         <Card>
           <CardHeader>
