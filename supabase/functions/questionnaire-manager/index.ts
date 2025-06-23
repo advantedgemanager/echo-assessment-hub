@@ -1,3 +1,4 @@
+
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -14,7 +15,7 @@ serve(async (req) => {
 
   try {
     const { action, questionnaire_data, version, description } = await req.json();
-    console.log(`Request method: ${req.method} Action: ${action}`);
+    console.log(`Enhanced questionnaire manager v2.0 - Action: ${action}`);
 
     // Initialize Supabase client
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
@@ -22,34 +23,31 @@ serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     if (action === 'upload') {
-      console.log('Processing enhanced questionnaire upload...');
+      console.log('=== Enhanced Questionnaire Upload v2.0 ===');
       
       try {
-        // Enhanced validation for large questionnaire uploads (265 questions)
         if (!questionnaire_data) {
           throw new Error('Missing questionnaire data');
         }
 
-        console.log('Raw questionnaire data structure:', JSON.stringify({
+        console.log('Raw questionnaire structure analysis:', JSON.stringify({
           hasTransitionPlan: !!questionnaire_data.transition_plan_questionnaire,
           hasSections: !!questionnaire_data.sections,
           hasBasicSections: !!questionnaire_data.basic_assessment_sections,
-          topLevelKeys: Object.keys(questionnaire_data)
+          topLevelKeys: Object.keys(questionnaire_data),
+          dataType: typeof questionnaire_data
         }, null, 2));
 
         let questionnaire;
         let finalVersion;
         let totalQuestions = 0;
 
-        // FIXED: Transform the structure FIRST, then validate
-        // Handle different input formats with enhanced validation and transformation
+        // Enhanced structure transformation with better logging
         if (questionnaire_data.transition_plan_questionnaire) {
-          // Format 1: Nested structure
           console.log('Processing Format 1: Nested transition_plan_questionnaire structure');
           const nestedData = questionnaire_data.transition_plan_questionnaire;
           
           if (nestedData.basic_assessment_sections) {
-            // Transform legacy nested structure
             questionnaire = {
               title: 'Enhanced Transition Plan Credibility Assessment',
               description: 'Comprehensive 265-question credibility assessment questionnaire',
@@ -68,21 +66,29 @@ serve(async (req) => {
             }
           } else if (nestedData.sections) {
             questionnaire = nestedData;
+            questionnaire.sections.forEach(section => {
+              if (section.questions && Array.isArray(section.questions)) {
+                totalQuestions += section.questions.length;
+              }
+            });
           } else {
             questionnaire = nestedData;
           }
           finalVersion = version || nestedData.metadata?.version || '4.0';
         } else if (questionnaire_data.sections) {
-          // Format 2: Direct structure with sections
           console.log('Processing Format 2: Direct sections structure');
           questionnaire = questionnaire_data;
+          questionnaire.sections.forEach(section => {
+            if (section.questions && Array.isArray(section.questions)) {
+              totalQuestions += section.questions.length;
+            }
+          });
           finalVersion = version || questionnaire.version || '4.0';
         } else if (questionnaire_data.basic_assessment_sections) {
-          // Format 3: Legacy structure - transform it
           console.log('Processing Format 3: Legacy basic_assessment_sections structure');
           questionnaire = {
             title: 'Enhanced Transition Plan Credibility Assessment',
-            description: 'Comprehensive 265-question credibility assessment questionnaire',
+            description: 'Comprehensive credibility assessment questionnaire',
             sections: []
           };
           
@@ -96,15 +102,12 @@ serve(async (req) => {
             questionnaire.sections.push(section);
             totalQuestions += section.questions.length;
           }
-          
           finalVersion = version || '4.0';
         } else {
-          // Try to handle any other structure by checking for nested data
           console.log('Processing unknown format, attempting auto-detection...');
           const keys = Object.keys(questionnaire_data);
-          console.log('Available keys:', keys);
+          console.log('Available keys for auto-detection:', keys);
           
-          // Look for any nested questionnaire data
           let foundData = null;
           for (const key of keys) {
             const value = questionnaire_data[key];
@@ -135,6 +138,11 @@ serve(async (req) => {
               }
             } else {
               questionnaire = foundData;
+              questionnaire.sections.forEach(section => {
+                if (section.questions && Array.isArray(section.questions)) {
+                  totalQuestions += section.questions.length;
+                }
+              });
             }
             finalVersion = version || foundData.version || '4.0';
           } else {
@@ -142,9 +150,9 @@ serve(async (req) => {
           }
         }
 
-        // NOW validate the transformed structure
+        // Enhanced validation AFTER transformation
         if (!questionnaire.sections || !Array.isArray(questionnaire.sections)) {
-          console.error('Validation failed - questionnaire structure:', JSON.stringify({
+          console.error('Validation failed after transformation:', JSON.stringify({
             hasSections: !!questionnaire.sections,
             sectionsType: typeof questionnaire.sections,
             isArray: Array.isArray(questionnaire.sections),
@@ -153,7 +161,6 @@ serve(async (req) => {
           throw new Error('Invalid questionnaire format: missing or invalid sections array after transformation');
         }
 
-        // Count total questions for validation if not already counted
         if (totalQuestions === 0) {
           questionnaire.sections.forEach(section => {
             if (section.questions && Array.isArray(section.questions)) {
@@ -162,12 +169,7 @@ serve(async (req) => {
           });
         }
 
-        console.log(`Processing enhanced questionnaire with ${questionnaire.sections.length} sections and ${totalQuestions} total questions, version: ${finalVersion}`);
-
-        // Validate large questionnaire structure
-        if (totalQuestions > 300) {
-          console.warn(`Very large questionnaire detected: ${totalQuestions} questions. Performance may be impacted.`);
-        }
+        console.log(`✅ Questionnaire validated successfully: ${questionnaire.sections.length} sections, ${totalQuestions} questions, version: ${finalVersion}`);
 
         if (totalQuestions === 0) {
           throw new Error('No questions found in questionnaire sections');
@@ -187,19 +189,23 @@ serve(async (req) => {
         const fileName = `enhanced_questionnaire_v${finalVersion}.json`;
         const filePath = `/questionnaires/enhanced/v${finalVersion}`;
         
-        console.log(`Saving enhanced questionnaire - name: ${fileName}, path: ${filePath}, questions: ${totalQuestions}`);
+        console.log(`Saving questionnaire - name: ${fileName}, path: ${filePath}, questions: ${totalQuestions}`);
 
-        // Deactivate all existing questionnaires
+        // FIXED: Properly deactivate existing questionnaires with explicit WHERE clause
+        console.log('Deactivating existing questionnaires...');
         const { error: deactivateError } = await supabase
           .from('questionnaire_metadata')
           .update({ is_active: false })
-          .neq('id', '00000000-0000-0000-0000-000000000000');
+          .eq('is_active', true);
 
         if (deactivateError) {
           console.warn('Warning: Could not deactivate existing questionnaires:', deactivateError);
+        } else {
+          console.log('✅ Successfully deactivated existing questionnaires');
         }
 
-        // Insert the new enhanced questionnaire
+        // Insert the new questionnaire with enhanced error handling
+        console.log('Inserting new questionnaire...');
         const { data: insertData, error: insertError } = await supabase
           .from('questionnaire_metadata')
           .insert({
@@ -215,14 +221,15 @@ serve(async (req) => {
 
         if (insertError) {
           console.error('Database insert error:', insertError);
-          throw new Error(`Failed to save enhanced questionnaire: ${insertError.message}`);
+          throw new Error(`Failed to save questionnaire: ${insertError.message}`);
         }
 
-        console.log('Enhanced questionnaire uploaded successfully:', {
+        console.log('✅ Enhanced questionnaire uploaded successfully:', {
           id: insertData.id,
           version: finalVersion,
           totalQuestions: totalQuestions,
-          sections: questionnaire.sections.length
+          sections: transformedQuestionnaire.sections.length,
+          isActive: insertData.is_active
         });
 
         return new Response(JSON.stringify({ 
@@ -231,13 +238,14 @@ serve(async (req) => {
           version: finalVersion,
           sections_count: transformedQuestionnaire.sections.length,
           total_questions: totalQuestions,
+          is_active: insertData.is_active,
           message: `Enhanced questionnaire with ${totalQuestions} questions uploaded and activated successfully`
         }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
 
       } catch (uploadError) {
-        console.error('Error processing enhanced upload:', uploadError);
+        console.error('❌ Error processing enhanced upload:', uploadError);
         console.error('Error stack:', uploadError.stack);
         return new Response(
           JSON.stringify({ 
@@ -255,10 +263,9 @@ serve(async (req) => {
     }
 
     if (action === 'retrieve') {
-      console.log('Retrieving enhanced questionnaire...');
+      console.log('=== Enhanced Questionnaire Retrieval v2.0 ===');
       
       try {
-        // Enhanced retrieval with better fallback handling
         const { data: activeQuestionnaire, error: dbError } = await supabase
           .from('questionnaire_metadata')
           .select('*')
@@ -269,11 +276,12 @@ serve(async (req) => {
 
         if (!dbError && activeQuestionnaire) {
           const questionnaireData = activeQuestionnaire.questionnaire_data;
-          console.log(`Found active questionnaire in database: version ${activeQuestionnaire.version}`);
+          console.log(`✅ Found active questionnaire: version ${activeQuestionnaire.version}`);
           console.log(`Questionnaire details:`, {
             sections: questionnaireData?.sections?.length || 0,
             totalQuestions: questionnaireData?.totalQuestions || 'unknown',
-            enhanced: questionnaireData?.enhanced || false
+            enhanced: questionnaireData?.enhanced || false,
+            isActive: activeQuestionnaire.is_active
           });
           
           const response = {
@@ -283,7 +291,8 @@ serve(async (req) => {
               uploaded_at: activeQuestionnaire.uploaded_at,
               description: activeQuestionnaire.description,
               totalQuestions: questionnaireData?.totalQuestions,
-              enhanced: questionnaireData?.enhanced
+              enhanced: questionnaireData?.enhanced,
+              is_active: activeQuestionnaire.is_active
             }
           };
 
@@ -292,14 +301,13 @@ serve(async (req) => {
           });
         }
 
-        console.log('No active questionnaire in database, loading embedded questionnaire...');
+        console.log('⚠️ No active questionnaire in database, loading embedded questionnaire...');
         
         // Enhanced fallback to embedded questionnaire
         try {
           const questionnaireText = await Deno.readTextFile('./complete_transition_questionnaire.json');
           const questionnaireData = JSON.parse(questionnaireText);
           
-          // Count questions in embedded questionnaire
           let embeddedQuestions = 0;
           if (questionnaireData.sections) {
             questionnaireData.sections.forEach(section => {
@@ -309,7 +317,7 @@ serve(async (req) => {
             });
           }
           
-          console.log('Embedded questionnaire loaded successfully');
+          console.log('✅ Embedded questionnaire loaded successfully');
           console.log(`Embedded questionnaire details:`, {
             sections: questionnaireData.sections?.length || 0,
             totalQuestions: embeddedQuestions
@@ -322,7 +330,8 @@ serve(async (req) => {
               uploaded_at: new Date().toISOString(),
               description: questionnaireData.description || 'Embedded transition plan questionnaire',
               totalQuestions: embeddedQuestions,
-              enhanced: false
+              enhanced: false,
+              is_active: false
             }
           };
 
@@ -331,9 +340,9 @@ serve(async (req) => {
           });
           
         } catch (fileError) {
-          console.error('Error loading embedded questionnaire:', fileError);
+          console.error('❌ Error loading embedded questionnaire:', fileError);
           
-          // Enhanced fallback questionnaire with comprehensive structure for testing
+          // Enhanced fallback questionnaire for testing
           const fallbackQuestionnaire = {
             version: "4.0",
             title: "Enhanced Transition Plan Credibility Assessment",
@@ -407,18 +416,19 @@ serve(async (req) => {
               uploaded_at: new Date().toISOString(),
               description: 'Enhanced fallback questionnaire due to loading error',
               totalQuestions: 6,
-              enhanced: true
+              enhanced: true,
+              is_active: false
             }
           };
 
-          console.log('Using enhanced fallback questionnaire');
+          console.log('⚠️ Using enhanced fallback questionnaire');
           return new Response(JSON.stringify(response), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           });
         }
         
       } catch (retrieveError) {
-        console.error('Error retrieving enhanced questionnaire:', retrieveError);
+        console.error('❌ Error retrieving enhanced questionnaire:', retrieveError);
         throw retrieveError;
       }
     }
@@ -435,7 +445,7 @@ serve(async (req) => {
     );
 
   } catch (error) {
-    console.error('Error in enhanced questionnaire-manager:', error);
+    console.error('❌ Error in enhanced questionnaire-manager v2.0:', error);
     return new Response(
       JSON.stringify({ 
         error: error.message,

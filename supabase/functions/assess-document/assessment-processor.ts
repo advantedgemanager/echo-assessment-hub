@@ -1,4 +1,3 @@
-
 import { evaluateQuestionAgainstChunks, QuestionEvaluation } from './ai-evaluator.ts';
 
 export interface SectionResult {
@@ -34,21 +33,22 @@ export const processAssessment = async (
   checkTimeout?: () => void,
   documentWasTruncated: boolean = false
 ): Promise<AssessmentResults> => {
-  console.log('Starting enhanced assessment for large questionnaire (up to 265 questions)');
+  console.log('🚀 Starting enhanced assessment v5.0 for comprehensive questionnaire');
   
-  // Enhanced questionnaire extraction with better fallback handling
+  // Enhanced questionnaire extraction with detailed logging
   let questionnaire = questionnaireData;
   if (questionnaireData.questionnaire) {
     questionnaire = questionnaireData.questionnaire;
+    console.log('📋 Using nested questionnaire structure');
   }
   
-  // Additional fallback for nested structures
   if (questionnaire.transition_plan_questionnaire) {
     questionnaire = questionnaire.transition_plan_questionnaire;
+    console.log('📋 Using transition_plan_questionnaire structure');
   }
   
   if (!questionnaire.sections && questionnaire.basic_assessment_sections) {
-    // Transform the structure if needed
+    console.log('📋 Transforming basic_assessment_sections to sections format');
     const sections = [];
     for (const [sectionKey, sectionData] of Object.entries(questionnaire.basic_assessment_sections)) {
       sections.push({
@@ -62,12 +62,29 @@ export const processAssessment = async (
   }
   
   if (!questionnaire.sections || !Array.isArray(questionnaire.sections)) {
-    console.error('Invalid questionnaire structure:', questionnaire);
-    throw new Error('Invalid questionnaire format: no sections found');
+    console.error('❌ Invalid questionnaire structure after transformation:', {
+      hasSections: !!questionnaire.sections,
+      sectionsType: typeof questionnaire.sections,
+      isArray: Array.isArray(questionnaire.sections),
+      keys: Object.keys(questionnaire)
+    });
+    throw new Error('Invalid questionnaire format: no sections found after transformation');
   }
 
-  console.log(`Processing ${questionnaire.sections.length} sections with enhanced methodology`);
-  console.log('Available sections:', questionnaire.sections.map(s => ({ id: s.id, title: s.title, questions: s.questions?.length || 0 })));
+  // Enhanced logging with section analysis
+  const sectionAnalysis = questionnaire.sections.map(section => ({
+    id: section.id,
+    title: section.title,
+    questions: section.questions?.length || 0,
+    hasQuestions: !!(section.questions && Array.isArray(section.questions))
+  }));
+  
+  console.log('📊 Questionnaire analysis:', {
+    totalSections: questionnaire.sections.length,
+    sections: sectionAnalysis,
+    documentChunks: documentChunks.length,
+    documentWasTruncated
+  });
   
   const sectionResults: SectionResult[] = [];
   let totalScore = 0;
@@ -75,23 +92,29 @@ export const processAssessment = async (
   let questionsProcessed = 0;
   let totalQuestionsCount = 0;
   
-  // Count total questions for completeness tracking
+  // Count total questions with enhanced validation
   questionnaire.sections.forEach(section => {
     if (section.questions && Array.isArray(section.questions)) {
       totalQuestionsCount += section.questions.length;
     }
   });
   
-  console.log(`Total questions available: ${totalQuestionsCount}, processing ALL questions`);
+  console.log(`📈 Processing ${totalQuestionsCount} total questions across ${questionnaire.sections.length} sections`);
 
-  // Process each section with enhanced coverage
-  for (const section of questionnaire.sections) {
+  // Process each section with enhanced error handling and progress tracking
+  for (let sectionIndex = 0; sectionIndex < questionnaire.sections.length; sectionIndex++) {
+    const section = questionnaire.sections[sectionIndex];
+    
     if (checkTimeout) checkTimeout();
     
-    console.log(`Processing section: ${section.title || section.id}`);
+    console.log(`🔄 Processing section ${sectionIndex + 1}/${questionnaire.sections.length}: ${section.title || section.id}`);
     
     if (!section.questions || !Array.isArray(section.questions)) {
-      console.warn(`Section ${section.id} has no questions or invalid question format`);
+      console.warn(`⚠️ Section ${section.id} has invalid questions format:`, {
+        hasQuestions: !!section.questions,
+        questionsType: typeof section.questions,
+        isArray: Array.isArray(section.questions)
+      });
       continue;
     }
     
@@ -100,35 +123,40 @@ export const processAssessment = async (
     let sectionNoCount = 0;
     let sectionNaCount = 0;
     
-    // Process ALL questions in each section
     const questionsToProcess = section.questions;
     const sectionTotalQuestions = questionsToProcess.length;
     
-    console.log(`Processing ${questionsToProcess.length} questions in section: ${section.title || section.id}`);
+    console.log(`📝 Processing ${questionsToProcess.length} questions in section: ${section.title || section.id}`);
     
-    // Process questions in smaller batches to improve success rate
-    const batchSize = 5; // Reduced batch size for better reliability
-    for (let i = 0; i < questionsToProcess.length; i += batchSize) {
+    // Enhanced batch processing with adaptive batch sizes
+    const adaptiveBatchSize = Math.max(3, Math.min(8, Math.floor(questionsToProcess.length / 5)));
+    console.log(`🔧 Using adaptive batch size: ${adaptiveBatchSize}`);
+    
+    for (let i = 0; i < questionsToProcess.length; i += adaptiveBatchSize) {
       if (checkTimeout) checkTimeout();
       
-      const batch = questionsToProcess.slice(i, i + batchSize);
-      console.log(`Processing batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(questionsToProcess.length/batchSize)} (questions ${i+1}-${Math.min(i+batchSize, questionsToProcess.length)})`);
+      const batch = questionsToProcess.slice(i, i + adaptiveBatchSize);
+      const batchNumber = Math.floor(i / adaptiveBatchSize) + 1;
+      const totalBatches = Math.ceil(questionsToProcess.length / adaptiveBatchSize);
+      
+      console.log(`📦 Processing batch ${batchNumber}/${totalBatches} (questions ${i + 1}-${Math.min(i + adaptiveBatchSize, questionsToProcess.length)}) in section ${section.title || section.id}`);
       
       for (const question of batch) {
         if (checkTimeout) checkTimeout();
         
-        // Handle different question formats
-        const questionId = question.id || question.questionId || `q_${questionsProcessed}`;
+        const questionId = question.id || question.questionId || `q_${questionsProcessed + 1}`;
         const questionText = question.question_text || question.text || question.questionText;
         
-        if (!questionText) {
-          console.warn(`Question ${questionId} has no text, skipping`);
+        if (!questionText || questionText.trim().length === 0) {
+          console.warn(`⚠️ Question ${questionId} has no text, skipping`);
           continue;
         }
         
-        console.log(`Processing question ${questionId}: ${questionText.substring(0, 100)}...`);
+        console.log(`🔍 Processing question ${questionId} (${questionsProcessed + 1}/${totalQuestionsCount}): ${questionText.substring(0, 80)}...`);
         
         try {
+          const startTime = Date.now();
+          
           const questionEvaluation = await evaluateQuestionAgainstChunks(
             {
               id: questionId,
@@ -139,40 +167,60 @@ export const processAssessment = async (
             mistralApiKey
           );
           
-          // Enhanced scoring with proper weight handling
+          const processingTime = Date.now() - startTime;
+          console.log(`⏱️ Question ${questionId} processed in ${processingTime}ms`);
+          
+          // Enhanced scoring with detailed logging
+          const scoreYes = question.score_yes || 1;
+          const scoreNo = question.score_no || 0;
+          const scoreNa = question.score_na || 0;
+          
           switch (questionEvaluation.response) {
             case 'Yes':
               sectionYesCount++;
-              totalScore += question.score_yes || 1;
+              totalScore += scoreYes;
+              console.log(`✅ Question ${questionId}: YES (score: +${scoreYes})`);
               break;
             case 'No':
               sectionNoCount++;
-              totalScore += question.score_no || 0;
+              totalScore += scoreNo;
+              console.log(`❌ Question ${questionId}: NO (score: +${scoreNo})`);
               break;
             default:
               sectionNaCount++;
-              totalScore += question.score_na || 0;
+              totalScore += scoreNa;
+              console.log(`❓ Question ${questionId}: N/A (score: +${scoreNa})`);
               break;
           }
           
-          maxPossibleScore += question.score_yes || 1;
+          maxPossibleScore += scoreYes;
           questionEvaluations.push(questionEvaluation);
           questionsProcessed++;
           
-          // Add progressive delay to prevent rate limiting
-          if (questionsProcessed % 3 === 0) {
-            await new Promise(resolve => setTimeout(resolve, 500));
+          // Enhanced progress reporting
+          const progressPercentage = Math.round((questionsProcessed / totalQuestionsCount) * 100);
+          if (questionsProcessed % 10 === 0) {
+            console.log(`📊 Overall progress: ${questionsProcessed}/${totalQuestionsCount} questions (${progressPercentage}%)`);
+            console.log(`📈 Current score: ${totalScore}/${maxPossibleScore} (${Math.round((totalScore / maxPossibleScore) * 100)}%)`);
+          }
+          
+          // Dynamic delay to prevent rate limiting
+          if (questionsProcessed % 5 === 0) {
+            await new Promise(resolve => setTimeout(resolve, 800));
           }
           
         } catch (questionError) {
-          console.error(`Error processing question ${questionId}:`, questionError);
+          console.error(`❌ Error processing question ${questionId}:`, {
+            error: questionError.message,
+            questionText: questionText.substring(0, 100)
+          });
           
-          // Enhanced fallback with better error tracking
+          // Enhanced fallback handling
           const fallbackEvaluation: QuestionEvaluation = {
             questionId: questionId,
             questionText: questionText,
             response: 'Not enough information',
-            score: (question.score_na || 0) * 0.3,
+            score: (question.score_na || 0) * 0.25, // Reduced fallback score
             weight: 1
           };
           
@@ -181,14 +229,17 @@ export const processAssessment = async (
           maxPossibleScore += question.score_yes || 1;
           questionEvaluations.push(fallbackEvaluation);
           questionsProcessed++;
+          
+          console.log(`🔄 Question ${questionId}: FALLBACK (score: +${fallbackEvaluation.score})`);
         }
       }
       
-      // Progress update after each batch
-      const progressPercentage = Math.round((questionsProcessed / totalQuestionsCount) * 100);
-      console.log(`Progress: ${questionsProcessed}/${totalQuestionsCount} questions processed (${progressPercentage}%)`);
+      // Enhanced batch completion reporting
+      const sectionProgress = Math.round((questionEvaluations.length / sectionTotalQuestions) * 100);
+      console.log(`📋 Section batch ${batchNumber}/${totalBatches} completed. Section progress: ${questionEvaluations.length}/${sectionTotalQuestions} (${sectionProgress}%)`);
     }
     
+    // Enhanced section completion analysis
     const totalSectionQuestions = questionEvaluations.length;
     const yesPercentage = totalSectionQuestions > 0 ? Math.round((sectionYesCount / totalSectionQuestions) * 100) : 0;
     const sectionCompleteness = sectionTotalQuestions > 0 ? Math.round((totalSectionQuestions / sectionTotalQuestions) * 100) : 0;
@@ -204,24 +255,45 @@ export const processAssessment = async (
       completeness: sectionCompleteness
     });
     
-    console.log(`Section ${section.title || section.id} completed: ${sectionYesCount}/${totalSectionQuestions} yes responses (${yesPercentage}%), completeness: ${sectionCompleteness}%`);
+    console.log(`✅ Section "${section.title || section.id}" completed:`, {
+      questions: totalSectionQuestions,
+      yesCount: sectionYesCount,
+      noCount: sectionNoCount,
+      naCount: sectionNaCount,
+      yesPercentage: `${yesPercentage}%`,
+      completeness: `${sectionCompleteness}%`
+    });
   }
 
-  // Enhanced overall assessment calculation
-  const assessmentResult = calculateEnhancedOverallResult(sectionResults, questionsProcessed, totalQuestionsCount);
+  // Enhanced overall assessment calculation with detailed analysis
   const assessmentCompleteness = totalQuestionsCount > 0 ? Math.round((questionsProcessed / totalQuestionsCount) * 100) : 0;
+  const overallScore = maxPossibleScore > 0 ? Math.round((totalScore / maxPossibleScore) * 100) : 0;
   
-  console.log(`Enhanced assessment completed with result: ${assessmentResult.overallResult}`);
-  console.log(`Questions processed: ${questionsProcessed}/${totalQuestionsCount} (${assessmentCompleteness}%)`);
-  console.log(`Red flag triggered: ${assessmentResult.redFlagTriggered}`);
-  console.log(`Reasoning: ${assessmentResult.reasoning}`);
+  console.log('📊 Assessment completion summary:', {
+    questionsProcessed,
+    totalQuestionsCount,
+    completeness: `${assessmentCompleteness}%`,
+    totalScore,
+    maxPossibleScore,
+    overallScore: `${overallScore}%`,
+    sectionsProcessed: sectionResults.length
+  });
+  
+  const assessmentResult = calculateEnhancedOverallResult(sectionResults, questionsProcessed, totalQuestionsCount);
+  
+  console.log('🎯 Enhanced assessment completed:', {
+    overallResult: assessmentResult.overallResult,
+    redFlagTriggered: assessmentResult.redFlagTriggered,
+    reasoning: assessmentResult.reasoning,
+    completeness: `${assessmentCompleteness}%`
+  });
 
   return {
     sections: sectionResults,
     overallResult: assessmentResult.overallResult,
     totalScore,
     maxPossibleScore,
-    credibilityScore: getEnhancedCredibilityScore(assessmentResult.overallResult, assessmentCompleteness, sectionResults),
+    credibilityScore: getEnhancedCredibilityScore(assessmentResult.overallResult, assessmentCompleteness, sectionResults, overallScore),
     redFlagTriggered: assessmentResult.redFlagTriggered,
     redFlagQuestions: assessmentResult.redFlagQuestions,
     reasoning: assessmentResult.reasoning,
@@ -401,39 +473,62 @@ function downgradeResult(result: 'Aligned' | 'Aligning' | 'Partially Aligned'): 
   }
 }
 
-function getEnhancedCredibilityScore(overallResult: string, completeness: number, sectionResults: SectionResult[]): number {
+function getEnhancedCredibilityScore(
+  overallResult: string, 
+  completeness: number, 
+  sectionResults: SectionResult[], 
+  overallScore: number
+): number {
   let baseScore = 0;
+  
+  // Base score from overall result
   switch (overallResult) {
     case 'Aligned':
-      baseScore = 85;
+      baseScore = 88;
       break;
     case 'Aligning':
-      baseScore = 70;
+      baseScore = 72;
       break;
     case 'Partially Aligned':
-      baseScore = 50;
+      baseScore = 52;
       break;
     case 'Misaligned':
-      baseScore = 25;
+      baseScore = 28;
       break;
     default:
-      baseScore = 0;
+      baseScore = 35;
   }
   
   // Enhanced scoring considers actual performance data
   if (sectionResults.length > 0) {
     const averageYesPercentage = sectionResults.reduce((sum, section) => sum + section.yesPercentage, 0) / sectionResults.length;
     
-    // Adjust base score based on actual performance
-    const performanceAdjustment = (averageYesPercentage - 50) * 0.3;
+    // Adjust base score based on actual performance with more nuanced scaling
+    const performanceAdjustment = (averageYesPercentage - 50) * 0.25;
     baseScore = Math.round(baseScore + performanceAdjustment);
+    
+    // Additional adjustment based on overall score
+    const scoreAdjustment = (overallScore - 50) * 0.15;
+    baseScore = Math.round(baseScore + scoreAdjustment);
   }
   
   // Minimal completeness penalty for comprehensive assessments
-  if (completeness < 90) {
-    const completenessAdjustment = (completeness / 100) * 0.05;
-    baseScore = Math.round(baseScore * (0.95 + completenessAdjustment));
+  if (completeness < 95) {
+    const completenessAdjustment = (completeness / 100) * 0.03;
+    baseScore = Math.round(baseScore * (0.97 + completenessAdjustment));
   }
   
-  return Math.max(20, Math.min(95, baseScore));
+  // Ensure score is within reasonable bounds
+  const finalScore = Math.max(25, Math.min(92, baseScore));
+  
+  console.log(`🎯 Credibility score calculation:`, {
+    overallResult,
+    baseScore: baseScore,
+    averageYesPercentage: sectionResults.length > 0 ? Math.round(sectionResults.reduce((sum, section) => sum + section.yesPercentage, 0) / sectionResults.length) : 0,
+    overallScore,
+    completeness: `${completeness}%`,
+    finalScore
+  });
+  
+  return finalScore;
 }
