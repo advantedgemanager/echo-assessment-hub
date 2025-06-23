@@ -12,9 +12,12 @@ const DetailedAssessmentSummary: React.FC<DetailedAssessmentSummaryProps> = ({
   totalScore,
   maxPossibleScore,
   reportId,
-  sectionsProcessed
+  sectionsProcessed,
+  overallResult,
+  redFlagTriggered,
+  reasoning
 }) => {
-  const { questionResults, sectionStats, isLoading } = useAssessmentData(reportId);
+  const { questionResults, sectionStats, isLoading, assessmentData } = useAssessmentData(reportId);
   const { generatePdfReport, isGeneratingPdf } = usePdfGenerator();
 
   const handleGeneratePdf = () => {
@@ -36,6 +39,11 @@ const DetailedAssessmentSummary: React.FC<DetailedAssessmentSummaryProps> = ({
     );
   }
 
+  // Use data from assessment if available, otherwise use props
+  const finalOverallResult = assessmentData?.overallResult || overallResult;
+  const finalRedFlagTriggered = assessmentData?.redFlagTriggered || redFlagTriggered;
+  const finalReasoning = assessmentData?.reasoning || reasoning;
+
   return (
     <div className="space-y-6">
       <AssessmentSummaryCard
@@ -43,6 +51,9 @@ const DetailedAssessmentSummary: React.FC<DetailedAssessmentSummaryProps> = ({
         totalScore={totalScore}
         maxPossibleScore={maxPossibleScore}
         sectionsProcessed={sectionsProcessed}
+        overallResult={finalOverallResult}
+        redFlagTriggered={finalRedFlagTriggered}
+        reasoning={finalReasoning}
         onGeneratePdf={handleGeneratePdf}
         isGeneratingPdf={isGeneratingPdf}
       />
@@ -50,6 +61,17 @@ const DetailedAssessmentSummary: React.FC<DetailedAssessmentSummaryProps> = ({
       <SectionStatisticsCard sectionStats={sectionStats} />
 
       <DetailedResultsTable questionResults={questionResults} />
+      
+      {finalRedFlagTriggered && assessmentData?.redFlagQuestions && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+          <h3 className="font-semibold text-red-800 mb-2">Red Flag Questions:</h3>
+          <ul className="text-sm text-red-700 space-y-1">
+            {assessmentData.redFlagQuestions.map((question, index) => (
+              <li key={index}>• {question}</li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 };

@@ -1,4 +1,3 @@
-
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
@@ -29,6 +28,32 @@ serve(async (req) => {
     }
 
     console.log('Request method:', method, 'Action:', action)
+
+    if (action === 'retrieve') {
+      // Load embedded questionnaire file
+      try {
+        const questionnaireText = await Deno.readTextFile('./complete_transition_questionnaire.json')
+        const questionnaireData = JSON.parse(questionnaireText)
+
+        return new Response(
+          JSON.stringify({ 
+            questionnaire: questionnaireData,
+            metadata: {
+              version: questionnaireData.version || "1.0",
+              uploaded_at: new Date().toISOString(),
+              description: questionnaireData.description || "Complete Transition Plan Assessment"
+            }
+          }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      } catch (error) {
+        console.error('Error loading embedded questionnaire:', error)
+        return new Response(
+          JSON.stringify({ error: 'Failed to load embedded questionnaire' }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+    }
 
     if (method === 'POST' && action === 'upload') {
       // Upload questionnaire file
@@ -90,50 +115,6 @@ serve(async (req) => {
           success: true, 
           message: 'Questionnaire uploaded successfully',
           file_path: filePath
-        }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
-
-    if (action === 'retrieve') {
-      // Get active questionnaire
-      const { data: metadata, error: metadataError } = await supabaseClient
-        .from('questionnaire_metadata')
-        .select('*')
-        .eq('is_active', true)
-        .single()
-
-      if (metadataError || !metadata) {
-        return new Response(
-          JSON.stringify({ error: 'No active questionnaire found' }),
-          { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
-      }
-
-      // Download file from storage
-      const { data: fileData, error: downloadError } = await supabaseClient.storage
-        .from('questionnaires')
-        .download(metadata.file_path)
-
-      if (downloadError || !fileData) {
-        console.error('Download error:', downloadError)
-        return new Response(
-          JSON.stringify({ error: 'Failed to retrieve questionnaire' }),
-          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
-      }
-
-      const questionnaireText = await fileData.text()
-      const questionnaireData = JSON.parse(questionnaireText)
-
-      return new Response(
-        JSON.stringify({ 
-          questionnaire: questionnaireData,
-          metadata: {
-            version: metadata.version,
-            uploaded_at: metadata.uploaded_at,
-            description: metadata.description
-          }
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )

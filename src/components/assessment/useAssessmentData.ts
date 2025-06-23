@@ -7,6 +7,7 @@ import { QuestionResult, SectionStats, AssessmentData } from './types';
 export const useAssessmentData = (reportId: string) => {
   const [questionResults, setQuestionResults] = useState<QuestionResult[]>([]);
   const [sectionStats, setSectionStats] = useState<SectionStats[]>([]);
+  const [assessmentData, setAssessmentData] = useState<AssessmentData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const { toast } = useToast();
 
@@ -28,6 +29,7 @@ export const useAssessmentData = (reportId: string) => {
           throw new Error('Invalid assessment data structure');
         }
 
+        setAssessmentData(assessmentData);
         const sections = assessmentData.sections;
         const allQuestions: QuestionResult[] = [];
         const stats: SectionStats[] = [];
@@ -90,5 +92,5 @@ export const useAssessmentData = (reportId: string) => {
     fetchDetailedResults();
   }, [reportId, toast]);
 
-  return { questionResults, sectionStats, isLoading };
+  return { questionResults, sectionStats, assessmentData, isLoading };
 };

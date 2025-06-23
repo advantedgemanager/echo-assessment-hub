@@ -1,0 +1,140 @@
+
+{
+  "version": "1.0",
+  "title": "Complete Transition Plan Credibility Assessment",
+  "description": "Comprehensive questionnaire for evaluating organizational transition plans",
+  "sections": [
+    {
+      "id": "section_1_red_flags",
+      "title": "Section 1 - Red Flag Questions",
+      "description": "Critical questions that can override all other scores",
+      "questions": [
+        {
+          "id": "1",
+          "question_text": "Does the transition plan include a clear timeline with specific milestones?",
+          "section": "section_1_red_flags",
+          "score_yes": 1,
+          "score_no": 0,
+          "score_na": 0
+        },
+        {
+          "id": "2", 
+          "question_text": "Are key stakeholders clearly identified and engaged in the transition process?",
+          "section": "section_1_red_flags",
+          "score_yes": 1,
+          "score_no": 0,
+          "score_na": 0
+        },
+        {
+          "id": "3",
+          "question_text": "Is there evidence of leadership commitment and support for the transition?",
+          "section": "section_1_red_flags", 
+          "score_yes": 1,
+          "score_no": 0,
+          "score_na": 0
+        }
+      ]
+    },
+    {
+      "id": "section_2_accountability",
+      "title": "Section 2 - Accountability",
+      "description": "Questions that determine the base credibility score",
+      "questions": [
+        {
+          "id": "4",
+          "question_text": "Are roles and responsibilities clearly defined for all team members?",
+          "section": "section_2_accountability",
+          "score_yes": 1,
+          "score_no": 0,
+          "score_na": 0
+        },
+        {
+          "id": "5",
+          "question_text": "Is there a designated transition leader or team responsible for oversight?",
+          "section": "section_2_accountability",
+          "score_yes": 1,
+          "score_no": 0,
+          "score_na": 0
+        },
+        {
+          "id": "6",
+          "question_text": "Are accountability mechanisms and reporting structures established?",
+          "section": "section_2_accountability",
+          "score_yes": 1,
+          "score_no": 0,
+          "score_na": 0
+        },
+        {
+          "id": "7",
+          "question_text": "Is there a process for monitoring progress and making adjustments?",
+          "section": "section_2_accountability",
+          "score_yes": 1,
+          "score_no": 0,
+          "score_na": 0
+        }
+      ]
+    },
+    {
+      "id": "section_3_depth",
+      "title": "Section 3 - Depth",
+      "description": "Questions assessing the thoroughness of the transition plan",
+      "questions": [
+        {
+          "id": "8",
+          "question_text": "Does the plan include detailed risk assessment and mitigation strategies?",
+          "section": "section_3_depth",
+          "score_yes": 1,
+          "score_no": 0,
+          "score_na": 0
+        },
+        {
+          "id": "9",
+          "question_text": "Are resource requirements clearly identified and allocated?",
+          "section": "section_3_depth",
+          "score_yes": 1,
+          "score_no": 0,
+          "score_na": 0
+        },
+        {
+          "id": "10",
+          "question_text": "Is there evidence of stakeholder analysis and engagement planning?",
+          "section": "section_3_depth",
+          "score_yes": 1,
+          "score_no": 0,
+          "score_na": 0
+        }
+      ]
+    },
+    {
+      "id": "section_4_action",
+      "title": "Section 4 - Action",
+      "description": "Questions evaluating actionable elements of the transition plan",
+      "questions": [
+        {
+          "id": "11",
+          "question_text": "Are specific actions and tasks clearly outlined with deadlines?",
+          "section": "section_4_action",
+          "score_yes": 1,
+          "score_no": 0,
+          "score_na": 0
+        },
+        {
+          "id": "12",
+          "question_text": "Is there evidence of implementation planning and execution strategies?",
+          "section": "section_4_action",
+          "score_yes": 1,
+          "score_no": 0,
+          "score_na": 0
+        },
+        {
+          "id": "13",
+          "question_text": "Are success metrics and evaluation criteria defined?",
+          "section": "section_4_action",
+          "score_yes": 1,
+          "score_no": 0,
+          "score_na": 0
+        }
+      ]
+    }
+  ]
+}

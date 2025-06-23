@@ -19,20 +19,19 @@ export const getDocument = async (supabaseClient: any, documentId: string, userI
 };
 
 export const getQuestionnaire = async (supabaseClient: any) => {
-  console.log('Fetching questionnaire from questionnaire-manager...');
+  console.log('Fetching embedded questionnaire...');
   
   const questionnaireResponse = await supabaseClient.functions.invoke('questionnaire-manager', {
     body: { action: 'retrieve' }
   });
 
-  console.log('Questionnaire response:', JSON.stringify(questionnaireResponse, null, 2));
+  console.log('Questionnaire response received');
 
   if (questionnaireResponse.error || !questionnaireResponse.data) {
     console.error('Failed to retrieve questionnaire:', questionnaireResponse.error);
-    throw new Error('Failed to retrieve questionnaire');
+    throw new Error('Failed to retrieve embedded questionnaire');
   }
 
-  // Return the full response data - let assessment-processor handle the structure
   return questionnaireResponse.data;
 };
 
@@ -51,12 +50,16 @@ export const saveAssessmentReport = async (
       company_name: document.file_name || 'Document Assessment',
       assessment_data: {
         sections: assessmentResults.sections,
+        overallResult: assessmentResults.overallResult,
         totalScore: assessmentResults.totalScore,
         maxPossibleScore: assessmentResults.maxPossibleScore,
+        redFlagTriggered: assessmentResults.redFlagTriggered,
+        redFlagQuestions: assessmentResults.redFlagQuestions,
+        reasoning: assessmentResults.reasoning,
         questionnaire_version: questionnaireVersion
       },
       credibility_score: credibilityScore,
-      report_type: 'comprehensive-questionnaire'
+      report_type: 'transition-plan-assessment'
     })
     .select()
     .single();

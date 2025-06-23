@@ -29,8 +29,12 @@ export interface AssessmentData {
       weight: number;
     }>;
   }>;
+  overallResult?: string;
   totalScore: number;
   maxPossibleScore: number;
+  redFlagTriggered?: boolean;
+  redFlagQuestions?: string[];
+  reasoning?: string;
   questionnaire_version?: string;
 }
 
@@ -40,4 +44,7 @@ export interface DetailedAssessmentSummaryProps {
   maxPossibleScore: number;
   reportId: string;
   sectionsProcessed: number;
+  overallResult?: string;
+  redFlagTriggered?: boolean;
+  reasoning?: string;
 }
