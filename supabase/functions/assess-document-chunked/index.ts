@@ -8,7 +8,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const openAIApiKey = Deno.env.get('OPENAI_API_KEY');
+const mistralApiKey = Deno.env.get('MISTRAL_API_KEY');
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -18,7 +18,7 @@ serve(async (req) => {
   const startTime = Date.now();
   
   try {
-    console.log('=== Starting chunked assessment v5.0 ===');
+    console.log('=== Starting chunked assessment with Mistral v5.0 ===');
     
     const supabaseClient = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
@@ -32,8 +32,8 @@ serve(async (req) => {
       throw new Error('Document ID and User ID are required');
     }
 
-    if (!openAIApiKey) {
-      throw new Error('OPENAI_API_KEY environment variable is not set');
+    if (!mistralApiKey) {
+      throw new Error('MISTRAL_API_KEY environment variable is not set');
     }
 
     // Get or create assessment progress record
@@ -42,10 +42,10 @@ serve(async (req) => {
       .select('*')
       .eq('document_id', documentId)
       .eq('user_id', userId)
-      .single();
+      .maybeSingle();
 
     let assessmentProgress;
-    if (progressError && progressError.code === 'PGRST116') {
+    if (!progressData) {
       // Create new progress record
       const { data: newProgress, error: createError } = await supabaseClient
         .from('assessment_progress')
@@ -120,7 +120,7 @@ serve(async (req) => {
     });
 
     const totalQuestions = allQuestions.length;
-    const batchSize = 12; // Smaller batch size for reliability
+    const batchSize = 10; // Smaller batch size for Mistral reliability
     const totalBatches = Math.ceil(totalQuestions / batchSize);
 
     // Update progress with total counts
@@ -148,10 +148,10 @@ serve(async (req) => {
     // Process questions in this batch
     const batchResults = [];
     for (const question of batchQuestions) {
-      const questionResult = await processQuestionWithOpenAI(
+      const questionResult = await processQuestionWithMistral(
         question,
         chunksToProcess,
-        openAIApiKey
+        mistralApiKey
       );
       batchResults.push(questionResult);
       console.log(`Processed question ${question.globalIndex + 1}/${totalQuestions}: ${questionResult.response}`);
@@ -232,7 +232,7 @@ function createDocumentChunks(text: string, chunkSize: number, overlap: number):
   return chunks;
 }
 
-async function processQuestionWithOpenAI(
+async function processQuestionWithMistral(
   question: any,
   documentChunks: string[],
   apiKey: string
@@ -261,14 +261,14 @@ Based on this content, does the document provide clear evidence to answer "Yes" 
 Answer with one word only: Yes, No, or Insufficient`;
 
   try {
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    const response = await fetch('https://api.mistral.ai/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'gpt-4o-mini',
+        model: 'mistral-large-latest',
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt }
@@ -279,7 +279,7 @@ Answer with one word only: Yes, No, or Insufficient`;
     });
 
     if (!response.ok) {
-      throw new Error(`OpenAI API error: ${response.status}`);
+      throw new Error(`Mistral API error: ${response.status}`);
     }
 
     const data = await response.json();
@@ -341,7 +341,7 @@ function findMostRelevantChunk(chunks: string[], questionText: string): string {
     }
   }
 
-  return bestChunk.substring(0, 2000); // Limit size for API
+  return bestChunk.substring(0, 2500); // Limit size for API
 }
 
 function extractKeywords(questionText: string): string[] {
