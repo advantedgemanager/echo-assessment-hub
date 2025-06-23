@@ -65,10 +65,12 @@ serve(async (req) => {
           .update({ is_active: false })
           .neq('id', '00000000-0000-0000-0000-000000000000');
 
-        // Insert the new questionnaire
+        // Insert the new questionnaire with proper file metadata
         const { data: insertData, error: insertError } = await supabase
           .from('questionnaire_metadata')
           .insert({
+            file_name: `questionnaire_v${transformedQuestionnaire.version}.json`,
+            file_path: `/questionnaires/v${transformedQuestionnaire.version}`,
             version: transformedQuestionnaire.version,
             description: transformedQuestionnaire.description,
             questionnaire_data: transformedQuestionnaire,
@@ -113,9 +115,9 @@ serve(async (req) => {
           .from('questionnaire_metadata')
           .select('*')
           .eq('is_active', true)
-          .order('created_at', { ascending: false })
+          .order('uploaded_at', { ascending: false })
           .limit(1)
-          .single();
+          .maybeSingle();
 
         if (!dbError && activeQuestionnaire) {
           console.log('Found active questionnaire in database');
@@ -123,7 +125,7 @@ serve(async (req) => {
             questionnaire: activeQuestionnaire.questionnaire_data,
             metadata: {
               version: activeQuestionnaire.version,
-              uploaded_at: activeQuestionnaire.created_at,
+              uploaded_at: activeQuestionnaire.uploaded_at,
               description: activeQuestionnaire.description
             }
           };

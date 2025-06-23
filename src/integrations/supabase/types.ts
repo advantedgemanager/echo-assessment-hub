@@ -82,6 +82,7 @@ export type Database = {
           file_path: string
           id: string
           is_active: boolean
+          questionnaire_data: Json | null
           uploaded_at: string
           version: string
         }
@@ -91,6 +92,7 @@ export type Database = {
           file_path: string
           id?: string
           is_active?: boolean
+          questionnaire_data?: Json | null
           uploaded_at?: string
           version?: string
         }
@@ -100,6 +102,7 @@ export type Database = {
           file_path?: string
           id?: string
           is_active?: boolean
+          questionnaire_data?: Json | null
           uploaded_at?: string
           version?: string
         }
