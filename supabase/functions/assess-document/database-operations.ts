@@ -19,14 +19,20 @@ export const getDocument = async (supabaseClient: any, documentId: string, userI
 };
 
 export const getQuestionnaire = async (supabaseClient: any) => {
+  console.log('Fetching questionnaire from questionnaire-manager...');
+  
   const questionnaireResponse = await supabaseClient.functions.invoke('questionnaire-manager', {
     body: { action: 'retrieve' }
   });
 
-  if (questionnaireResponse.error || !questionnaireResponse.data?.questionnaire) {
+  console.log('Questionnaire response:', JSON.stringify(questionnaireResponse, null, 2));
+
+  if (questionnaireResponse.error || !questionnaireResponse.data) {
+    console.error('Failed to retrieve questionnaire:', questionnaireResponse.error);
     throw new Error('Failed to retrieve questionnaire');
   }
 
+  // Return the full response data - let assessment-processor handle the structure
   return questionnaireResponse.data;
 };
 
@@ -56,6 +62,7 @@ export const saveAssessmentReport = async (
     .single();
 
   if (reportError) {
+    console.error('Failed to save assessment report:', reportError);
     throw new Error('Failed to save assessment report');
   }
 

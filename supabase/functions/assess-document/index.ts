@@ -24,46 +24,66 @@ serve(async (req) => {
   }
 
   try {
+    console.log('=== Starting document assessment ===');
+    
     const supabaseClient = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
     const { documentId, userId } = await req.json();
+    console.log(`Processing assessment for document: ${documentId}, user: ${userId}`);
 
     if (!documentId || !userId) {
       throw new Error('Document ID and User ID are required');
     }
 
+    if (!mistralApiKey) {
+      throw new Error('MISTRAL_API_KEY environment variable is not set');
+    }
+
     // Get document with text
+    console.log('Fetching document...');
     const document = await getDocument(supabaseClient, documentId, userId);
+    console.log(`Document fetched: ${document.file_name}`);
 
     // Get questionnaire
+    console.log('Fetching questionnaire...');
     const questionnaireData = await getQuestionnaire(supabaseClient);
-    const questionnaire = questionnaireData.questionnaire;
+    console.log('Questionnaire fetched successfully');
     
     // Split document into manageable chunks
+    console.log('Creating document chunks...');
     const documentChunks = createDocumentChunks(document.document_text);
+    console.log(`Created ${documentChunks.length} document chunks`);
 
-    // Process the assessment
+    // Process the assessment - pass the full questionnaireData
+    console.log('Starting AI assessment...');
     const assessmentResults = await processAssessment(
-      questionnaire,
+      questionnaireData,
       documentChunks,
-      mistralApiKey!
+      mistralApiKey
     );
+    console.log('AI assessment completed');
 
     // Store assessment report
+    console.log('Saving assessment report...');
     const reportData = await saveAssessmentReport(
       supabaseClient,
       userId,
       document,
       assessmentResults,
       assessmentResults.credibilityScore,
-      questionnaireData.metadata.version
+      questionnaireData.metadata?.version || '1.0'
     );
+    console.log(`Assessment report saved with ID: ${reportData.id}`);
 
     // Update document status and make it permanent
+    console.log('Updating document status...');
     await updateDocumentStatus(supabaseClient, documentId);
+    console.log('Document status updated');
+
+    console.log('=== Assessment completed successfully ===');
 
     return new Response(
       JSON.stringify({
@@ -81,6 +101,7 @@ serve(async (req) => {
 
   } catch (error: any) {
     console.error('Error in assess-document:', error);
+    console.error('Error stack:', error.stack);
     return new Response(
       JSON.stringify({ error: error.message }),
       {
