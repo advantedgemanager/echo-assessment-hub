@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -9,12 +8,14 @@ import AssessmentProgress from '@/components/AssessmentProgress';
 import AssessmentResults from '@/components/AssessmentResults';
 import { useAssessment } from '@/hooks/useAssessment';
 import { Play, LogOut, FileText, RotateCcw, History } from 'lucide-react';
+import { useChunkedAssessment } from '@/hooks/useChunkedAssessment';
+import ChunkedAssessmentProgress from '@/components/ChunkedAssessmentProgress';
 
 const Dashboard = () => {
   const [uploadedDocumentId, setUploadedDocumentId] = useState<string | null>(null);
   const { user, signOut, loading } = useAuth();
   const navigate = useNavigate();
-  const { assessmentState, startAssessment, resetAssessment } = useAssessment();
+  const { assessmentState, startChunkedAssessment, resetAssessment } = useChunkedAssessment();
 
   useEffect(() => {
     if (!loading && !user) {
@@ -30,7 +31,7 @@ const Dashboard = () => {
 
   const handleStartAssessment = async () => {
     if (uploadedDocumentId && user) {
-      await startAssessment(uploadedDocumentId, user.id);
+      await startChunkedAssessment(uploadedDocumentId, user.id);
     }
   };
 
@@ -83,7 +84,7 @@ const Dashboard = () => {
           <div className="text-center">
             <h2 className="text-3xl font-bold mb-4">Transition Plan Assessment</h2>
             <p className="text-xl text-muted-foreground">
-              Upload your transition plan document to begin the AI-powered credibility assessment
+              Upload your transition plan document to begin the enhanced AI-powered credibility assessment
             </p>
           </div>
 
@@ -104,13 +105,17 @@ const Dashboard = () => {
             </div>
           )}
 
-          {/* Show assessment progress if in progress */}
-          {(assessmentState.status === 'processing' || assessmentState.status === 'assessing' || assessmentState.status === 'error') && (
-            <AssessmentProgress
+          {/* Show chunked assessment progress */}
+          {(assessmentState.status === 'processing' || assessmentState.status === 'error') && (
+            <ChunkedAssessmentProgress
               status={assessmentState.status}
               progress={assessmentState.progress}
               currentStep={assessmentState.currentStep}
               error={assessmentState.error || undefined}
+              currentBatch={assessmentState.currentBatch}
+              totalBatches={assessmentState.totalBatches}
+              processedQuestions={assessmentState.processedQuestions}
+              totalQuestions={assessmentState.totalQuestions}
             />
           )}
 
@@ -128,10 +133,10 @@ const Dashboard = () => {
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
                       <Play className="h-5 w-5" />
-                      Start Assessment
+                      Start Enhanced Assessment
                     </CardTitle>
                     <CardDescription>
-                      Begin the AI-powered credibility assessment of your uploaded document
+                      Begin the enhanced AI-powered assessment with improved reliability and real-time progress
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
@@ -142,11 +147,16 @@ const Dashboard = () => {
                       size="lg"
                     >
                       <FileText className="h-5 w-5 mr-2" />
-                      {assessmentState.status === 'idle' ? 'Start Assessment' : 'Assessment in Progress...'}
+                      {assessmentState.status === 'idle' ? 'Start Enhanced Assessment' : 'Assessment in Progress...'}
                     </Button>
                     {!uploadedDocumentId && assessmentState.status === 'idle' && (
                       <p className="text-sm text-muted-foreground mt-2 text-center">
                         Please upload a document first
+                      </p>
+                    )}
+                    {assessmentState.status === 'processing' && (
+                      <p className="text-sm text-green-600 mt-2 text-center">
+                        Enhanced processing with better reliability
                       </p>
                     )}
                   </CardContent>
@@ -155,20 +165,27 @@ const Dashboard = () => {
             </div>
           )}
 
-          {/* Instructions */}
+          {/* Updated Instructions */}
           <Card>
             <CardHeader>
-              <CardTitle>How it works</CardTitle>
+              <CardTitle>Enhanced Assessment Process</CardTitle>
             </CardHeader>
             <CardContent>
               <ol className="list-decimal list-inside space-y-2 text-sm">
                 <li>Upload your transition plan document (PDF or DOCX format)</li>
-                <li>Click "Start Assessment" to begin the AI analysis</li>
-                <li>The system will extract text and evaluate your plan against credibility criteria</li>
-                <li>Each question is answered with "Yes", "No", or "Not enough information"</li>
-                <li>Receive a detailed assessment report with your credibility score</li>
-                <li>Your document will be permanently stored for future reference</li>
+                <li>Click "Start Enhanced Assessment" to begin the AI analysis</li>
+                <li>The system processes your document in optimized batches for better reliability</li>
+                <li>Track real-time progress as questions are evaluated</li>
+                <li>Each question is analyzed with advanced AI for "Yes", "No", or "Insufficient" responses</li>
+                <li>Receive a comprehensive assessment report with detailed scoring</li>
+                <li>Your results are automatically saved for future reference</li>
               </ol>
+              <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+                <p className="text-sm text-green-800">
+                  <strong>Enhanced Features:</strong> Improved reliability, faster processing, real-time progress tracking, 
+                  and better error handling for a smoother assessment experience.
+                </p>
+              </div>
             </CardContent>
           </Card>
         </div>
