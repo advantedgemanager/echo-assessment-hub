@@ -9,6 +9,81 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
+      assessment_progress: {
+        Row: {
+          batch_results: Json | null
+          completed_at: string | null
+          created_at: string
+          current_batch: number
+          document_id: string
+          error_message: string | null
+          final_score: number | null
+          id: string
+          processed_questions: number
+          progress_percentage: number
+          report_id: string | null
+          sections_data: Json | null
+          status: string
+          total_batches: number
+          total_questions: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          batch_results?: Json | null
+          completed_at?: string | null
+          created_at?: string
+          current_batch?: number
+          document_id: string
+          error_message?: string | null
+          final_score?: number | null
+          id?: string
+          processed_questions?: number
+          progress_percentage?: number
+          report_id?: string | null
+          sections_data?: Json | null
+          status?: string
+          total_batches?: number
+          total_questions?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          batch_results?: Json | null
+          completed_at?: string | null
+          created_at?: string
+          current_batch?: number
+          document_id?: string
+          error_message?: string | null
+          final_score?: number | null
+          id?: string
+          processed_questions?: number
+          progress_percentage?: number
+          report_id?: string | null
+          sections_data?: Json | null
+          status?: string
+          total_batches?: number
+          total_questions?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "assessment_progress_document_id_fkey"
+            columns: ["document_id"]
+            isOneToOne: false
+            referencedRelation: "uploaded_documents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "assessment_progress_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "assessment_reports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       assessment_reports: {
         Row: {
           assessment_data: Json

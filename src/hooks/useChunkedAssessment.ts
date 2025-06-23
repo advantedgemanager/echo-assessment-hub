@@ -21,6 +21,12 @@ export interface ChunkedAssessmentState {
   } | null;
 }
 
+interface AssessmentData {
+  totalScore?: number;
+  maxPossibleScore?: number;
+  sections?: Array<any>;
+}
+
 export const useChunkedAssessment = () => {
   const [assessmentState, setAssessmentState] = useState<ChunkedAssessmentState>({
     status: 'idle',
@@ -131,41 +137,66 @@ export const useChunkedAssessment = () => {
   };
 
   const getFinalResults = async (documentId: string, userId: string) => {
-    // Get the assessment progress to find the report ID
-    const { data: progress } = await supabase
-      .from('assessment_progress')
-      .select('report_id')
-      .eq('document_id', documentId)
-      .eq('user_id', userId)
-      .eq('status', 'completed')
-      .single();
+    try {
+      // Get the assessment progress to find the report ID
+      const { data: progress, error: progressError } = await supabase
+        .from('assessment_progress')
+        .select('report_id')
+        .eq('document_id', documentId)
+        .eq('user_id', userId)
+        .eq('status', 'completed')
+        .maybeSingle();
 
-    if (progress?.report_id) {
-      const { data: report } = await supabase
-        .from('assessment_reports')
-        .select('*')
-        .eq('id', progress.report_id)
-        .single();
-
-      if (report) {
-        return {
-          credibilityScore: report.credibility_score,
-          totalScore: report.assessment_data.totalScore || 0,
-          maxPossibleScore: report.assessment_data.maxPossibleScore || 100,
-          reportId: report.id,
-          sectionsProcessed: report.assessment_data.sections?.length || 0
-        };
+      if (progressError) {
+        console.error('Error fetching progress:', progressError);
+        throw new Error('Failed to fetch assessment progress');
       }
-    }
 
-    // Fallback
-    return {
-      credibilityScore: 0,
-      totalScore: 0,
-      maxPossibleScore: 100,
-      reportId: '',
-      sectionsProcessed: 0
-    };
+      if (progress?.report_id) {
+        const { data: report, error: reportError } = await supabase
+          .from('assessment_reports')
+          .select('*')
+          .eq('id', progress.report_id)
+          .maybeSingle();
+
+        if (reportError) {
+          console.error('Error fetching report:', reportError);
+          throw new Error('Failed to fetch assessment report');
+        }
+
+        if (report) {
+          // Safely parse the assessment_data JSON
+          const assessmentData = report.assessment_data as AssessmentData;
+          
+          return {
+            credibilityScore: report.credibility_score,
+            totalScore: assessmentData?.totalScore || 0,
+            maxPossibleScore: assessmentData?.maxPossibleScore || 100,
+            reportId: report.id,
+            sectionsProcessed: assessmentData?.sections?.length || 0
+          };
+        }
+      }
+
+      // Fallback if no report found
+      return {
+        credibilityScore: 0,
+        totalScore: 0,
+        maxPossibleScore: 100,
+        reportId: '',
+        sectionsProcessed: 0
+      };
+    } catch (error: any) {
+      console.error('Error getting final results:', error);
+      // Return fallback values instead of throwing
+      return {
+        credibilityScore: 0,
+        totalScore: 0,
+        maxPossibleScore: 100,
+        reportId: '',
+        sectionsProcessed: 0
+      };
+    }
   };
 
   const resetAssessment = () => {
