@@ -8,55 +8,71 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Maximum document size (2MB in characters)
-const MAX_DOCUMENT_SIZE = 2 * 1024 * 1024;
-// Maximum chunk size for processing
-const MAX_CHUNK_SIZE = 400 * 1024; // 400KB chunks
+// Maximum document size (1.5MB in characters for stability)
+const MAX_DOCUMENT_SIZE = 1.5 * 1024 * 1024;
+// Maximum chunk size for processing (reduced for memory efficiency)
+const MAX_CHUNK_SIZE = 300 * 1024; // 300KB chunks
 
 const extractTextFromPdf = async (arrayBuffer: ArrayBuffer): Promise<string> => {
   console.log('Extracting text from PDF...');
   
   try {
-    // Convert ArrayBuffer to Uint8Array
+    // Convert ArrayBuffer to Uint8Array with memory management
     const uint8Array = new Uint8Array(arrayBuffer);
+    console.log(`Processing PDF of size: ${uint8Array.length} bytes`);
     
-    // Try to find text streams in PDF
+    // Process in smaller chunks to avoid memory issues
     const decoder = new TextDecoder('utf-8', { fatal: false });
-    let rawText = decoder.decode(uint8Array);
-    
-    // Look for text between stream markers
-    const textPatterns = [
-      /BT\s+(.+?)\s+ET/gs, // Text between BT (Begin Text) and ET (End Text)
-      /Tj\s*\((.*?)\)/gs,  // Text in Tj operators
-      /TJ\s*\[(.*?)\]/gs,  // Text in TJ operators
-      /\((.*?)\)\s*Tj/gs   // Text before Tj operators
-    ];
-    
+    const chunkSize = 50000; // Process 50KB at a time
     let extractedText = '';
     
-    for (const pattern of textPatterns) {
-      const matches = rawText.match(pattern);
-      if (matches) {
-        for (const match of matches) {
-          // Clean up the match
-          let cleanText = match
-            .replace(/BT|ET|Tj|TJ|\[|\]|\(|\)/g, '') // Remove PDF operators
-            .replace(/[^\x20-\x7E\n\r\t]/g, ' ') // Keep only printable ASCII
-            .replace(/\s+/g, ' ') // Normalize whitespace
-            .trim();
-          
-          if (cleanText.length > 10) { // Only add meaningful text
-            extractedText += cleanText + ' ';
+    // Look for text streams in PDF with improved patterns
+    const textPatterns = [
+      /BT\s+(.+?)\s+ET/gs, // Text between BT (Begin Text) and ET (End Text)
+      /\(([^)]+)\)\s*Tj/gs, // Text in parentheses before Tj
+      /\[([^\]]+)\]\s*TJ/gs, // Text arrays before TJ
+      /\/F\d+\s+\d+\s+Tf\s*(.+?)(?=BT|ET|endstream)/gs // Text after font commands
+    ];
+    
+    // Process the PDF in chunks to avoid memory overload
+    for (let i = 0; i < uint8Array.length; i += chunkSize) {
+      const chunk = uint8Array.slice(i, i + chunkSize);
+      const chunkText = decoder.decode(chunk);
+      
+      for (const pattern of textPatterns) {
+        const matches = chunkText.match(pattern);
+        if (matches) {
+          for (const match of matches) {
+            // Clean up the match more efficiently
+            let cleanText = match
+              .replace(/BT|ET|Tj|TJ|\[|\]|\(|\)|\/F\d+|\d+\s+Tf/g, '') // Remove PDF operators
+              .replace(/[^\x20-\x7E\n\r\t\s]/g, ' ') // Keep only printable ASCII and spaces
+              .replace(/\s+/g, ' ') // Normalize whitespace
+              .trim();
+            
+            // Only add meaningful text chunks
+            if (cleanText.length > 20 && /[a-zA-Z]/.test(cleanText)) {
+              extractedText += cleanText + ' ';
+            }
           }
         }
       }
+      
+      // Memory management - break if we have enough text
+      if (extractedText.length > MAX_CHUNK_SIZE) {
+        console.log('Reached maximum text length, stopping extraction');
+        break;
+      }
     }
     
-    // If no structured text found, try basic extraction
-    if (extractedText.length < 100) {
-      console.log('Trying basic text extraction...');
+    // If no structured text found, try basic extraction on first 100KB only
+    if (extractedText.length < 200) {
+      console.log('Trying basic text extraction on limited data...');
+      const limitedData = uint8Array.slice(0, 100000); // Only process first 100KB
+      const rawText = decoder.decode(limitedData);
+      
       extractedText = rawText
-        .replace(/[^\x20-\x7E\n\r\t]/g, ' ') // Remove non-printable chars
+        .replace(/[^\x20-\x7E\n\r\t\s]/g, ' ') // Remove non-printable chars
         .replace(/\s+/g, ' ') // Normalize whitespace
         .split(' ')
         .filter(word => word.length > 2 && /[a-zA-Z]/.test(word)) // Keep words with letters
@@ -66,9 +82,15 @@ const extractTextFromPdf = async (arrayBuffer: ArrayBuffer): Promise<string> => 
     
     console.log(`PDF text extraction result: ${extractedText.length} characters`);
     
-    if (extractedText.length < 50) {
-      throw new Error('Unable to extract readable text from PDF. The PDF may be image-based or encrypted.');
+    if (extractedText.length < 100) {
+      throw new Error('Unable to extract sufficient readable text from PDF. The PDF may be image-based, encrypted, or corrupted.');
     }
+    
+    // Clean up the extracted text for better AI processing
+    extractedText = extractedText
+      .replace(/\s+/g, ' ') // Normalize all whitespace
+      .replace(/(.)\1{4,}/g, '$1$1$1') // Remove excessive character repetition
+      .trim();
     
     return extractedText;
     
@@ -83,36 +105,67 @@ const extractTextFromDocx = async (arrayBuffer: ArrayBuffer): Promise<string> =>
   
   try {
     const uint8Array = new Uint8Array(arrayBuffer);
-    const decoder = new TextDecoder('utf-8', { fatal: false });
-    let text = decoder.decode(uint8Array);
+    console.log(`Processing DOCX of size: ${uint8Array.length} bytes`);
     
-    // Look for XML text content in DOCX
-    const textMatches = text.match(/<w:t[^>]*>([^<]+)<\/w:t>/g);
+    // Process in chunks for memory efficiency
+    const decoder = new TextDecoder('utf-8', { fatal: false });
+    const chunkSize = 50000;
     let extractedText = '';
     
-    if (textMatches) {
-      for (const match of textMatches) {
-        const textContent = match.replace(/<[^>]+>/g, '').trim();
-        if (textContent.length > 0) {
-          extractedText += textContent + ' ';
+    // Look for XML text content in DOCX with improved patterns
+    const textPatterns = [
+      /<w:t[^>]*>([^<]+)<\/w:t>/g,
+      /<w:p[^>]*>([^<]*)<\/w:p>/g,
+      /<text[^>]*>([^<]+)<\/text>/g
+    ];
+    
+    for (let i = 0; i < uint8Array.length; i += chunkSize) {
+      const chunk = uint8Array.slice(i, i + chunkSize);
+      const chunkText = decoder.decode(chunk);
+      
+      for (const pattern of textPatterns) {
+        const matches = chunkText.match(pattern);
+        if (matches) {
+          for (const match of matches) {
+            const textContent = match.replace(/<[^>]+>/g, '').trim();
+            if (textContent.length > 0 && /[a-zA-Z]/.test(textContent)) {
+              extractedText += textContent + ' ';
+            }
+          }
         }
+      }
+      
+      // Memory management
+      if (extractedText.length > MAX_CHUNK_SIZE) {
+        console.log('Reached maximum text length, stopping extraction');
+        break;
       }
     }
     
-    // Fallback to basic extraction if structured extraction fails
-    if (extractedText.length < 100) {
+    // Fallback to basic extraction if needed
+    if (extractedText.length < 200) {
+      console.log('Trying basic DOCX extraction...');
+      const limitedData = uint8Array.slice(0, 100000);
+      const text = decoder.decode(limitedData);
+      
       extractedText = text
         .replace(/<[^>]+>/g, ' ') // Remove XML tags
-        .replace(/[^\x20-\x7E\n\r\t]/g, ' ') // Remove non-printable chars
+        .replace(/[^\x20-\x7E\n\r\t\s]/g, ' ') // Remove non-printable chars
         .replace(/\s+/g, ' ') // Normalize whitespace
         .trim();
     }
     
     console.log(`DOCX text extraction result: ${extractedText.length} characters`);
     
-    if (extractedText.length < 50) {
-      throw new Error('Unable to extract readable text from DOCX.');
+    if (extractedText.length < 100) {
+      throw new Error('Unable to extract sufficient readable text from DOCX.');
     }
+    
+    // Clean up the extracted text
+    extractedText = extractedText
+      .replace(/\s+/g, ' ')
+      .replace(/(.)\1{4,}/g, '$1$1$1')
+      .trim();
     
     return extractedText;
     
@@ -126,6 +179,8 @@ const truncateText = (text: string, maxSize: number): { text: string, wasTruncat
   if (text.length <= maxSize) {
     return { text, wasTruncated: false };
   }
+  
+  console.log(`Truncating text from ${text.length} to ${maxSize} characters`);
   
   // Truncate at sentence boundary near the limit
   const truncated = text.substring(0, maxSize);
@@ -147,6 +202,8 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  const startTime = Date.now();
+  
   try {
     console.log('=== Starting enhanced document processing ===');
     
@@ -162,7 +219,7 @@ serve(async (req) => {
       throw new Error('Document ID is required');
     }
 
-    // Get document metadata
+    // Get document metadata with error handling
     const { data: document, error: docError } = await supabaseClient
       .from('uploaded_documents')
       .select('*')
@@ -170,28 +227,59 @@ serve(async (req) => {
       .single();
 
     if (docError || !document) {
-      throw new Error('Document not found');
+      console.error('Document fetch error:', docError);
+      throw new Error(`Document not found: ${docError?.message || 'Unknown error'}`);
     }
 
     console.log(`Document details: ${document.file_name}, Size: ${document.file_size} bytes, Type: ${document.file_type}`);
 
-    // Download file from storage
-    const { data: fileData, error: downloadError } = await supabaseClient.storage
-      .from('documents')
-      .download(document.file_path);
+    // Check file size before processing
+    if (document.file_size > 5 * 1024 * 1024) { // 5MB limit
+      throw new Error('Document too large. Please use a smaller file (max 5MB).');
+    }
 
-    if (downloadError || !fileData) {
-      console.error('Download error:', downloadError);
-      throw new Error('Failed to download document from storage');
+    // Download file from storage with timeout
+    let fileData;
+    try {
+      const downloadPromise = supabaseClient.storage
+        .from('documents')
+        .download(document.file_path);
+      
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Download timeout')), 30000)
+      );
+      
+      const downloadResult = await Promise.race([downloadPromise, timeoutPromise]);
+      
+      if (downloadResult.error || !downloadResult.data) {
+        console.error('Download error:', downloadResult.error);
+        throw new Error(`Failed to download document: ${downloadResult.error?.message || 'Unknown error'}`);
+      }
+      
+      fileData = downloadResult.data;
+    } catch (downloadError) {
+      console.error('Download failed:', downloadError);
+      throw new Error(`Document download failed: ${downloadError.message}`);
     }
 
     console.log('Document downloaded successfully');
 
-    // Extract text based on file type
+    // Extract text based on file type with improved error handling
     let extractedText = '';
-    const arrayBuffer = await fileData.arrayBuffer();
+    let arrayBuffer;
     
-    console.log(`File type: ${document.file_type}, Array buffer size: ${arrayBuffer.byteLength}`);
+    try {
+      arrayBuffer = await fileData.arrayBuffer();
+      console.log(`File type: ${document.file_type}, Array buffer size: ${arrayBuffer.byteLength}`);
+      
+      if (arrayBuffer.byteLength === 0) {
+        throw new Error('Downloaded file is empty');
+      }
+      
+    } catch (bufferError) {
+      console.error('ArrayBuffer conversion error:', bufferError);
+      throw new Error(`Failed to process file data: ${bufferError.message}`);
+    }
     
     try {
       if (document.file_type === 'application/pdf' || document.file_name.toLowerCase().endsWith('.pdf')) {
@@ -212,18 +300,28 @@ serve(async (req) => {
     }
 
     console.log(`Extracted text length: ${extractedText.length} characters`);
-    console.log(`Text preview: ${extractedText.substring(0, 500)}...`);
-
-    // Validate extracted text quality
+    
+    // Enhanced text validation
     if (extractedText.length < 100) {
       throw new Error('Extracted text is too short. The document may be empty, image-based, or corrupted.');
     }
 
     // Check for meaningful content
-    const wordCount = extractedText.split(/\s+/).filter(word => word.length > 2).length;
+    const wordCount = extractedText.split(/\s+/).filter(word => word.length > 2 && /[a-zA-Z]/.test(word)).length;
     if (wordCount < 50) {
       throw new Error('Document does not contain enough readable text for assessment.');
     }
+
+    // Check text quality
+    const totalChars = extractedText.length;
+    const meaningfulChars = (extractedText.match(/[a-zA-Z0-9\s.,;:!?()-]/g) || []).length;
+    const qualityRatio = meaningfulChars / totalChars;
+    
+    if (qualityRatio < 0.8) {
+      console.warn(`Low text quality ratio: ${(qualityRatio * 100).toFixed(1)}%`);
+    }
+
+    console.log(`Text preview: ${extractedText.substring(0, 500).replace(/\s+/g, ' ')}...`);
 
     // Handle large documents by smart truncation
     const { text: finalText, wasTruncated } = truncateText(extractedText, MAX_CHUNK_SIZE);
@@ -233,21 +331,27 @@ serve(async (req) => {
     }
 
     // Update document with extracted text
-    const { error: updateError } = await supabaseClient
-      .from('uploaded_documents')
-      .update({
-        document_text: finalText,
-        processed_at: new Date().toISOString(),
-        assessment_status: wasTruncated ? 'processed_truncated' : 'processed'
-      })
-      .eq('id', documentId);
+    try {
+      const { error: updateError } = await supabaseClient
+        .from('uploaded_documents')
+        .update({
+          document_text: finalText,
+          processed_at: new Date().toISOString(),
+          assessment_status: wasTruncated ? 'processed_truncated' : 'processed'
+        })
+        .eq('id', documentId);
 
-    if (updateError) {
-      console.error('Database update error:', updateError);
-      throw new Error('Failed to save extracted text to database');
+      if (updateError) {
+        console.error('Database update error:', updateError);
+        throw new Error(`Failed to save extracted text: ${updateError.message}`);
+      }
+    } catch (dbError) {
+      console.error('Database operation failed:', dbError);
+      throw new Error(`Database update failed: ${dbError.message}`);
     }
 
-    console.log('Document processing completed successfully');
+    const processingTime = Date.now() - startTime;
+    console.log(`Document processing completed successfully in ${processingTime}ms`);
 
     return new Response(
       JSON.stringify({
@@ -256,6 +360,8 @@ serve(async (req) => {
         wordCount: wordCount,
         wasTruncated,
         extractionMethod: document.file_type,
+        processingTime,
+        qualityRatio: Math.round(qualityRatio * 100),
         message: wasTruncated 
           ? 'Document was truncated due to size limits but processing completed'
           : 'Document processed successfully'
@@ -266,6 +372,7 @@ serve(async (req) => {
     );
 
   } catch (error: any) {
+    const processingTime = Date.now() - startTime;
     console.error('Error in document-processor:', error);
     console.error('Error stack:', error.stack);
     
@@ -273,6 +380,7 @@ serve(async (req) => {
       JSON.stringify({ 
         error: error.message,
         success: false,
+        processingTime,
         details: error.stack
       }),
       {

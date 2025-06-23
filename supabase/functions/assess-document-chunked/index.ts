@@ -15,6 +15,7 @@ serve(async (req) => {
   }
 
   const startTime = Date.now();
+  let batchNumber = 0; // Initialize batchNumber at the top level
   
   try {
     console.log('=== Starting optimized chunked assessment ===');
@@ -24,7 +25,10 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
-    const { documentId, userId, batchNumber = 0 } = await req.json();
+    const requestBody = await req.json();
+    const { documentId, userId } = requestBody;
+    batchNumber = requestBody.batchNumber || 0; // Safely assign batchNumber
+    
     console.log(`Processing batch ${batchNumber} for document: ${documentId}`);
 
     if (!documentId || !userId) {
@@ -35,120 +39,169 @@ serve(async (req) => {
       throw new Error('MISTRAL_API_KEY environment variable is not set');
     }
 
-    // Get document
+    // Get document with better error handling
     const { data: document, error: docError } = await supabaseClient
       .from('uploaded_documents')
-      .select('id, file_name, document_text, file_path, file_type')
+      .select('id, file_name, document_text, file_path, file_type, assessment_status')
       .eq('id', documentId)
       .eq('user_id', userId)
       .single();
 
     if (docError || !document) {
-      throw new Error('Document not found or not accessible');
+      console.error('Document fetch error:', docError);
+      throw new Error(`Document not found or not accessible: ${docError?.message || 'Unknown error'}`);
     }
 
-    // If document text is not available, process it first
+    console.log(`Document status: ${document.assessment_status}, Text length: ${document.document_text?.length || 0}`);
+
+    // Enhanced document processing logic
     if (!document.document_text || document.document_text.trim().length < 100) {
       console.log('Document text not available or too short, processing document first...');
       
-      const { data: processResult, error: processError } = await supabaseClient.functions.invoke('document-processor', {
-        body: { documentId }
-      });
+      try {
+        const { data: processResult, error: processError } = await supabaseClient.functions.invoke('document-processor', {
+          body: { documentId }
+        });
 
-      if (processError) {
-        console.error('Document processing error:', processError);
-        throw new Error(`Document processing failed: ${processError.message}`);
+        if (processError) {
+          console.error('Document processing invoke error:', processError);
+          throw new Error(`Document processing failed: ${processError.message}`);
+        }
+
+        if (!processResult?.success) {
+          console.error('Document processing result:', processResult);
+          throw new Error(`Document processing failed: ${processResult?.error || 'Unknown processing error'}`);
+        }
+
+        console.log('Document processing completed, refetching document...');
+
+        // Refetch the document after processing with retry logic
+        let retryCount = 0;
+        let processedDocument = null;
+        
+        while (retryCount < 3 && !processedDocument?.document_text) {
+          await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds
+          
+          const { data: refetchedDoc, error: refetchError } = await supabaseClient
+            .from('uploaded_documents')
+            .select('id, file_name, document_text')
+            .eq('id', documentId)
+            .eq('user_id', userId)
+            .single();
+
+          if (!refetchError && refetchedDoc?.document_text?.length > 100) {
+            processedDocument = refetchedDoc;
+            break;
+          }
+          
+          retryCount++;
+          console.log(`Retry ${retryCount}: Document text still not available`);
+        }
+
+        if (!processedDocument?.document_text) {
+          throw new Error('Document text still not available after processing and retries');
+        }
+
+        document.document_text = processedDocument.document_text;
+        console.log(`Document processed successfully, final text length: ${document.document_text.length}`);
+        
+      } catch (processingError) {
+        console.error('Document processing error:', processingError);
+        throw new Error(`Failed to process document: ${processingError.message}`);
       }
-
-      if (!processResult?.success) {
-        console.error('Document processing failed:', processResult);
-        throw new Error('Document processing failed - no readable text extracted');
-      }
-
-      // Refetch the document after processing
-      const { data: processedDocument, error: refetchError } = await supabaseClient
-        .from('uploaded_documents')
-        .select('id, file_name, document_text')
-        .eq('id', documentId)
-        .eq('user_id', userId)
-        .single();
-
-      if (refetchError || !processedDocument?.document_text) {
-        throw new Error('Document text still not available after processing');
-      }
-
-      document.document_text = processedDocument.document_text;
-      console.log(`Document processed successfully, text length: ${document.document_text.length}`);
     }
 
-    // Validate that we have readable text content
+    // Enhanced text validation
     const textContent = document.document_text.trim();
     if (textContent.length < 100) {
-      throw new Error('Document text is too short or empty - unable to perform assessment');
+      throw new Error('Document text is too short for assessment');
     }
 
-    // Check if the text looks like binary data
-    const binaryDataIndicators = /[\x00-\x08\x0E-\x1F\x7F-\xFF]/g;
-    const binaryMatches = textContent.match(binaryDataIndicators);
-    if (binaryMatches && binaryMatches.length > textContent.length * 0.1) {
-      console.warn('Document appears to contain binary data, may need better text extraction');
+    // Check for binary data indicators
+    const binaryDataRatio = (textContent.match(/[\x00-\x08\x0E-\x1F\x7F-\xFF]/g) || []).length / textContent.length;
+    if (binaryDataRatio > 0.1) {
+      console.warn(`High binary data ratio detected: ${(binaryDataRatio * 100).toFixed(1)}%`);
+      throw new Error('Document appears to contain mostly binary data - text extraction may have failed');
     }
 
     console.log(`Working with document text: ${textContent.length} characters`);
-    console.log(`Text preview: ${textContent.substring(0, 300)}...`);
+    console.log(`Text sample: ${textContent.substring(0, 300).replace(/\s+/g, ' ')}...`);
 
-    // Get or create assessment progress record
-    const { data: progressData, error: progressError } = await supabaseClient
-      .from('assessment_progress')
-      .select('*')
-      .eq('document_id', documentId)
-      .eq('user_id', userId)
-      .maybeSingle();
-
+    // Get or create assessment progress record with better error handling
     let assessmentProgress;
-    if (!progressData) {
-      // Create new progress record
-      const { data: newProgress, error: createError } = await supabaseClient
+    try {
+      const { data: progressData, error: progressError } = await supabaseClient
         .from('assessment_progress')
-        .insert({
-          document_id: documentId,
-          user_id: userId,
-          status: 'processing',
-          current_batch: 0,
-          total_batches: 0,
-          processed_questions: 0,
-          total_questions: 0,
-          batch_results: [],
-          created_at: new Date().toISOString()
-        })
-        .select()
-        .single();
+        .select('*')
+        .eq('document_id', documentId)
+        .eq('user_id', userId)
+        .maybeSingle();
 
-      if (createError) throw createError;
-      assessmentProgress = newProgress;
-    } else if (progressError) {
-      throw progressError;
-    } else {
-      assessmentProgress = progressData;
+      if (progressError) {
+        console.error('Progress fetch error:', progressError);
+        throw new Error(`Failed to fetch progress: ${progressError.message}`);
+      }
+
+      if (!progressData) {
+        // Create new progress record
+        const { data: newProgress, error: createError } = await supabaseClient
+          .from('assessment_progress')
+          .insert({
+            document_id: documentId,
+            user_id: userId,
+            status: 'processing',
+            current_batch: 0,
+            total_batches: 0,
+            processed_questions: 0,
+            total_questions: 0,
+            batch_results: [],
+            created_at: new Date().toISOString()
+          })
+          .select()
+          .single();
+
+        if (createError) {
+          console.error('Progress creation error:', createError);
+          throw new Error(`Failed to create progress record: ${createError.message}`);
+        }
+        assessmentProgress = newProgress;
+      } else {
+        assessmentProgress = progressData;
+      }
+    } catch (progressErr) {
+      console.error('Assessment progress error:', progressErr);
+      throw new Error(`Progress handling failed: ${progressErr.message}`);
     }
 
-    // Get questionnaire with minimal data transfer
-    const questionnaireResponse = await supabaseClient.functions.invoke('questionnaire-manager', {
-      body: { action: 'retrieve' }
-    });
+    // Get questionnaire with timeout and error handling
+    let questionnaireData;
+    try {
+      const questionnaireResponse = await Promise.race([
+        supabaseClient.functions.invoke('questionnaire-manager', {
+          body: { action: 'retrieve' }
+        }),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Questionnaire fetch timeout')), 10000)
+        )
+      ]);
 
-    if (questionnaireResponse.error || !questionnaireResponse.data) {
-      throw new Error('Failed to retrieve questionnaire');
+      if (questionnaireResponse.error || !questionnaireResponse.data) {
+        throw new Error(`Failed to retrieve questionnaire: ${questionnaireResponse.error?.message || 'Unknown error'}`);
+      }
+
+      questionnaireData = questionnaireResponse.data;
+    } catch (questionnaireErr) {
+      console.error('Questionnaire fetch error:', questionnaireErr);
+      throw new Error(`Questionnaire retrieval failed: ${questionnaireErr.message}`);
     }
 
-    const questionnaireData = questionnaireResponse.data;
     const questionnaire = questionnaireData.questionnaire?.sections || [];
     
     if (!Array.isArray(questionnaire) || questionnaire.length === 0) {
-      throw new Error('Invalid questionnaire format');
+      throw new Error('Invalid questionnaire format - no sections found');
     }
 
-    // Flatten questions efficiently
+    // ... keep existing code (flatten questions efficiently)
     const allQuestions = [];
     questionnaire.forEach((section, sectionIndex) => {
       if (section.questions && Array.isArray(section.questions)) {
@@ -166,8 +219,10 @@ serve(async (req) => {
     });
 
     const totalQuestions = allQuestions.length;
-    const batchSize = 5; // Reduced batch size for memory optimization
+    const batchSize = 3; // Further reduced for stability
     const totalBatches = Math.ceil(totalQuestions / batchSize);
+
+    console.log(`Total questions: ${totalQuestions}, Batch size: ${batchSize}, Total batches: ${totalBatches}`);
 
     // Update progress with total counts
     if (assessmentProgress.total_questions === 0) {
@@ -180,34 +235,47 @@ serve(async (req) => {
         .eq('id', assessmentProgress.id);
     }
 
-    // Process current batch
+    // Process current batch with enhanced error handling
     const startIndex = batchNumber * batchSize;
     const endIndex = Math.min(startIndex + batchSize, totalQuestions);
     const batchQuestions = allQuestions.slice(startIndex, endIndex);
 
     console.log(`Processing batch ${batchNumber + 1}/${totalBatches} (questions ${startIndex + 1}-${endIndex})`);
 
-    // Create smaller, more efficient document chunks
-    const documentChunks = createOptimizedChunks(textContent, 3000, 500);
-    const chunksToProcess = documentChunks.slice(0, 4); // Slightly increased for better coverage
+    if (batchQuestions.length === 0) {
+      throw new Error(`No questions found for batch ${batchNumber}`);
+    }
+
+    // Create optimized document chunks for analysis
+    const documentChunks = createOptimizedChunks(textContent, 2000, 300);
+    const chunksToProcess = documentChunks.slice(0, 3); // Limit chunks for memory
     
     console.log(`Created ${documentChunks.length} chunks, processing ${chunksToProcess.length}`);
-    console.log(`Sample chunk: ${chunksToProcess[0]?.substring(0, 200)}...`);
+    
+    if (chunksToProcess.length === 0) {
+      throw new Error('No document chunks available for analysis');
+    }
 
     // Process questions in this batch with improved error handling
     const batchResults = [];
-    for (const question of batchQuestions) {
+    for (let i = 0; i < batchQuestions.length; i++) {
+      const question = batchQuestions[i];
       try {
+        console.log(`Processing question ${i + 1}/${batchQuestions.length}: ${question.text.substring(0, 100)}...`);
+        
         const questionResult = await processQuestionWithMistral(
           question,
           chunksToProcess,
           mistralApiKey
         );
+        
         batchResults.push(questionResult);
-        console.log(`Processed question ${question.globalIndex + 1}/${totalQuestions}: ${questionResult.response}`);
+        console.log(`Question ${question.globalIndex + 1} result: ${questionResult.response}`);
         
         // Small delay between questions to avoid rate limits
-        await new Promise(resolve => setTimeout(resolve, 200));
+        if (i < batchQuestions.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
         
       } catch (error) {
         console.error(`Error processing question ${question.globalIndex}:`, error);
@@ -224,7 +292,7 @@ serve(async (req) => {
       }
     }
 
-    // Update progress efficiently
+    // Update progress efficiently with error handling
     const newProcessedCount = assessmentProgress.processed_questions + batchResults.length;
     const progressPercentage = Math.round((newProcessedCount / totalQuestions) * 100);
 
@@ -233,26 +301,37 @@ serve(async (req) => {
       ? assessmentProgress.batch_results 
       : [];
     
-    await supabaseClient
-      .from('assessment_progress')
-      .update({
-        current_batch: batchNumber + 1,
-        processed_questions: newProcessedCount,
-        progress_percentage: progressPercentage,
-        batch_results: [...existingResults, ...batchResults],
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', assessmentProgress.id);
+    try {
+      await supabaseClient
+        .from('assessment_progress')
+        .update({
+          current_batch: batchNumber + 1,
+          processed_questions: newProcessedCount,
+          progress_percentage: progressPercentage,
+          batch_results: [...existingResults, ...batchResults],
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', assessmentProgress.id);
+    } catch (updateError) {
+      console.error('Progress update error:', updateError);
+      throw new Error(`Failed to update progress: ${updateError.message}`);
+    }
 
     const isComplete = newProcessedCount >= totalQuestions;
     
     if (isComplete) {
       // Finalize assessment
-      await finalizeAssessment(supabaseClient, assessmentProgress.id, userId, document, questionnaireData);
+      try {
+        await finalizeAssessment(supabaseClient, assessmentProgress.id, userId, document, questionnaireData);
+      } catch (finalizeError) {
+        console.error('Assessment finalization error:', finalizeError);
+        // Don't throw here - the batch processing was successful
+        console.log('Continuing despite finalization error...');
+      }
     }
 
     const processingTime = Date.now() - startTime;
-    console.log(`Batch ${batchNumber + 1} completed in ${processingTime}ms`);
+    console.log(`Batch ${batchNumber + 1} completed successfully in ${processingTime}ms`);
 
     return new Response(
       JSON.stringify({
@@ -281,7 +360,7 @@ serve(async (req) => {
         error: error.message,
         success: false,
         processingTime,
-        batchNumber,
+        batchNumber, // Now properly defined
         details: error.stack
       }),
       {
@@ -297,16 +376,29 @@ function createOptimizedChunks(text: string, chunkSize: number, overlap: number)
   let start = 0;
   
   // Limit total chunks to prevent memory issues
-  const maxChunks = 6;
+  const maxChunks = 5;
   let chunkCount = 0;
   
   while (start < text.length && chunkCount < maxChunks) {
     const end = Math.min(start + chunkSize, text.length);
-    const chunk = text.substring(start, end);
+    let chunk = text.substring(start, end);
+    
+    // Try to end at sentence boundaries for better context
+    if (end < text.length) {
+      const lastSentenceEnd = Math.max(
+        chunk.lastIndexOf('.'),
+        chunk.lastIndexOf('!'),
+        chunk.lastIndexOf('?')
+      );
+      
+      if (lastSentenceEnd > chunkSize * 0.7) {
+        chunk = chunk.substring(0, lastSentenceEnd + 1);
+      }
+    }
     
     // Only add chunks with meaningful content
-    if (chunk.trim().length > 100) {
-      chunks.push(chunk);
+    if (chunk.trim().length > 200) {
+      chunks.push(chunk.trim());
       chunkCount++;
     }
     
@@ -326,25 +418,25 @@ async function processQuestionWithMistral(
   const relevantChunk = findMostRelevantChunk(documentChunks, question.text);
   
   console.log(`Processing question: ${question.text.substring(0, 100)}...`);
-  console.log(`Using chunk: ${relevantChunk.substring(0, 200)}...`);
+  console.log(`Using chunk of ${relevantChunk.length} characters`);
 
   const systemPrompt = `You are an expert evaluator of corporate climate transition plans. Analyze the document content carefully and answer whether it provides clear evidence for the specific question asked.
 
-INSTRUCTIONS:
+CRITICAL INSTRUCTIONS:
 - Read the document content thoroughly
-- Answer with exactly one word: "Yes", "No", or "Insufficient"
-- "Yes" only if there is explicit, specific evidence in the document
-- "No" if the document clearly contradicts or lacks the requirement
-- "Insufficient" if the content is vague, unclear, or doesn't directly address the question
+- Answer with exactly ONE WORD: "Yes", "No", or "Insufficient"
+- "Yes" ONLY if there is explicit, specific evidence in the document that directly answers the question
+- "No" if the document clearly contradicts or explicitly lacks the requirement
+- "Insufficient" if the content is vague, unclear, incomplete, or doesn't directly address the question
 
-Important: Base your answer ONLY on what is explicitly stated in the document content provided.`;
+Base your answer ONLY on what is explicitly stated in the document content provided.`;
 
   const userPrompt = `Question: "${question.text}"
 
 Document Content to Analyze:
 ${relevantChunk}
 
-Based on the document content above, does it provide clear evidence to answer this question? Answer with one word only: Yes, No, or Insufficient`;
+Based ONLY on the document content above, does it provide clear and explicit evidence to answer this question positively? Answer with one word only: Yes, No, or Insufficient`;
 
   try {
     const response = await fetch('https://api.mistral.ai/v1/chat/completions', {
@@ -359,8 +451,8 @@ Based on the document content above, does it provide clear evidence to answer th
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt }
         ],
-        max_tokens: 10,
-        temperature: 0.1
+        max_tokens: 5,
+        temperature: 0.0
       }),
     });
 
@@ -415,7 +507,7 @@ function findMostRelevantChunk(chunks: string[], questionText: string): string {
       const keywordLower = keyword.toLowerCase();
       // Count occurrences of each keyword
       const matches = (chunkLower.match(new RegExp(keywordLower, 'gi')) || []).length;
-      score += matches * 2; // Weight keyword matches higher
+      score += matches * 3; // Weight keyword matches higher
     });
 
     // Bonus for chunk length (longer chunks likely have more context)
@@ -428,22 +520,23 @@ function findMostRelevantChunk(chunks: string[], questionText: string): string {
   }
 
   // Ensure chunk is not too long for API
-  return bestChunk.substring(0, 2000);
+  return bestChunk.substring(0, 1800);
 }
 
 function extractKeywords(questionText: string): string[] {
   const commonKeywords = [
     'net zero', 'carbon neutral', 'emissions', 'climate', 'transition',
     'targets', 'governance', 'board', 'strategy', 'plan', 'progress',
-    'scope 1', 'scope 2', 'scope 3', 'ghg', 'greenhouse gas'
+    'scope 1', 'scope 2', 'scope 3', 'ghg', 'greenhouse gas',
+    'verification', 'monitoring', 'compensation', 'executive'
   ];
 
   const questionWords = questionText.toLowerCase()
     .split(/\s+/)
     .filter(word => word.length > 3 && !['what', 'does', 'have', 'been', 'will', 'this', 'that', 'with', 'from', 'they', 'their'].includes(word))
-    .slice(0, 8);
+    .slice(0, 6);
 
-  return [...commonKeywords.slice(0, 8), ...questionWords];
+  return [...commonKeywords.slice(0, 10), ...questionWords];
 }
 
 async function finalizeAssessment(
