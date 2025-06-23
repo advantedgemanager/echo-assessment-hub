@@ -75,6 +75,36 @@ export type Database = {
         }
         Relationships: []
       }
+      questionnaire_metadata: {
+        Row: {
+          description: string | null
+          file_name: string
+          file_path: string
+          id: string
+          is_active: boolean
+          uploaded_at: string
+          version: string
+        }
+        Insert: {
+          description?: string | null
+          file_name: string
+          file_path: string
+          id?: string
+          is_active?: boolean
+          uploaded_at?: string
+          version?: string
+        }
+        Update: {
+          description?: string | null
+          file_name?: string
+          file_path?: string
+          id?: string
+          is_active?: boolean
+          uploaded_at?: string
+          version?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
