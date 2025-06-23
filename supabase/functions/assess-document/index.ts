@@ -18,10 +18,10 @@ const corsHeaders = {
 
 const mistralApiKey = Deno.env.get('MISTRAL_API_KEY');
 
-// Increased resource limits
-const MAX_PROCESSING_TIME = 6 * 60 * 1000; // Increased to 6 minutes
-const MAX_DOCUMENT_LENGTH = 120000; // Increased to 120k characters
-const MAX_CHUNKS = 25; // Increased chunk limit
+// Enhanced resource limits
+const MAX_PROCESSING_TIME = 8 * 60 * 1000; // Increased to 8 minutes
+const MAX_DOCUMENT_LENGTH = 150000; // Increased to 150k characters
+const MAX_CHUNKS = 35; // Increased chunk limit
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -31,7 +31,7 @@ serve(async (req) => {
   const startTime = Date.now();
   
   try {
-    console.log('=== Starting document assessment with improved error handling ===');
+    console.log('=== Starting enhanced document assessment ===');
     
     const supabaseClient = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
@@ -49,59 +49,64 @@ serve(async (req) => {
       throw new Error('MISTRAL_API_KEY environment variable is not set');
     }
 
-    // Check elapsed time periodically with increased tolerance
+    // Enhanced timeout checking
     const checkTimeout = () => {
-      if (Date.now() - startTime > MAX_PROCESSING_TIME) {
-        throw new Error('Processing timeout - document assessment taking too long');
+      const elapsed = Date.now() - startTime;
+      if (elapsed > MAX_PROCESSING_TIME) {
+        throw new Error(`Processing timeout - assessment taking too long (${Math.round(elapsed/1000)}s)`);
       }
     };
 
-    // Get document with text
+    // Get document with enhanced validation
     console.log('Fetching document...');
     checkTimeout();
     const document = await getDocument(supabaseClient, documentId, userId);
     console.log(`Document fetched: ${document.file_name}, text length: ${document.document_text?.length || 0}`);
 
-    // Validate document size
     if (!document.document_text) {
       throw new Error('Document text not available. Please process the document first.');
     }
 
+    // Enhanced document handling with truncation tracking
+    let documentWasTruncated = false;
+    let processedText = document.document_text;
+    
     if (document.document_text.length > MAX_DOCUMENT_LENGTH) {
-      console.warn(`Document too large for assessment: ${document.document_text.length} chars, truncating to ${MAX_DOCUMENT_LENGTH}`);
-      document.document_text = document.document_text.substring(0, MAX_DOCUMENT_LENGTH);
+      console.warn(`Document size: ${document.document_text.length} chars, truncating to ${MAX_DOCUMENT_LENGTH}`);
+      processedText = document.document_text.substring(0, MAX_DOCUMENT_LENGTH);
+      documentWasTruncated = true;
     }
 
-    // Get questionnaire
+    // Get questionnaire with enhanced error handling
     console.log('Fetching questionnaire...');
     checkTimeout();
     const questionnaireData = await getQuestionnaire(supabaseClient);
     console.log('Questionnaire fetched successfully');
     
-    // Split document into manageable chunks
-    console.log('Creating document chunks...');
-    const documentChunks = createDocumentChunks(document.document_text, 1800, 200); // Slightly larger chunks
+    // Enhanced document chunking
+    console.log('Creating document chunks with improved strategy...');
+    const documentChunks = createDocumentChunks(processedText, 2000, 300); // Larger chunks with overlap
     
-    // Limit number of chunks to process
     const chunksToProcess = documentChunks.slice(0, MAX_CHUNKS);
-    console.log(`Created ${documentChunks.length} chunks, processing first ${chunksToProcess.length}`);
+    console.log(`Created ${documentChunks.length} chunks, processing ${chunksToProcess.length}`);
 
     checkTimeout();
 
-    // Process the assessment with improved error handling
-    console.log('Starting AI assessment with rate limiting...');
+    // Enhanced assessment processing
+    console.log('Starting enhanced AI assessment...');
     const assessmentResults = await processAssessment(
       questionnaireData,
       chunksToProcess,
       mistralApiKey,
-      checkTimeout
+      checkTimeout,
+      documentWasTruncated
     );
-    console.log('AI assessment completed successfully');
+    console.log('Enhanced AI assessment completed successfully');
 
     checkTimeout();
 
-    // Store assessment report
-    console.log('Saving assessment report...');
+    // Enhanced assessment report storage
+    console.log('Saving enhanced assessment report...');
     const reportData = await saveAssessmentReport(
       supabaseClient,
       userId,
@@ -110,16 +115,17 @@ serve(async (req) => {
       assessmentResults.credibilityScore,
       questionnaireData.metadata?.version || '1.0'
     );
-    console.log(`Assessment report saved with ID: ${reportData.id}`);
+    console.log(`Enhanced assessment report saved with ID: ${reportData.id}`);
 
-    // Update document status and make it permanent
+    // Update document status
     console.log('Updating document status...');
     await updateDocumentStatus(supabaseClient, documentId);
     console.log('Document status updated');
 
     const processingTime = Date.now() - startTime;
-    console.log(`=== Assessment completed successfully in ${processingTime}ms ===`);
+    console.log(`=== Enhanced assessment completed successfully in ${processingTime}ms ===`);
 
+    // Enhanced response with additional metadata
     return new Response(
       JSON.stringify({
         success: true,
@@ -130,7 +136,12 @@ serve(async (req) => {
         sectionsProcessed: assessmentResults.sections.length,
         processingTime,
         chunksProcessed: chunksToProcess.length,
-        wasTruncated: document.document_text.length === MAX_DOCUMENT_LENGTH
+        wasTruncated: documentWasTruncated,
+        assessmentCompleteness: assessmentResults.assessmentCompleteness,
+        processedQuestions: assessmentResults.processedQuestions,
+        totalQuestions: assessmentResults.totalQuestions,
+        overallResult: assessmentResults.overallResult,
+        redFlagTriggered: assessmentResults.redFlagTriggered
       }),
       {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -139,11 +150,11 @@ serve(async (req) => {
 
   } catch (error: any) {
     const processingTime = Date.now() - startTime;
-    console.error('Error in assess-document:', error);
+    console.error('Error in enhanced assess-document:', error);
     console.error('Error stack:', error.stack);
     console.error(`Failed after ${processingTime}ms`);
     
-    // Improved error categorization for better user feedback
+    // Enhanced error categorization
     let errorMessage = error.message;
     let errorCode = 'PROCESSING_ERROR';
     
@@ -162,6 +173,9 @@ serve(async (req) => {
     } else if (error.message.includes('Invalid questionnaire format')) {
       errorMessage = 'Assessment questionnaire format error. Please contact support.';
       errorCode = 'QUESTIONNAIRE_FORMAT_ERROR';
+    } else if (error.message.includes('fetch')) {
+      errorMessage = 'Network error while connecting to AI service. Please check your connection and try again.';
+      errorCode = 'NETWORK_ERROR';
     }
     
     return new Response(
@@ -169,7 +183,8 @@ serve(async (req) => {
         error: errorMessage,
         errorCode,
         processingTime,
-        success: false
+        success: false,
+        details: error.message // Include original error for debugging
       }),
       {
         status: 500,

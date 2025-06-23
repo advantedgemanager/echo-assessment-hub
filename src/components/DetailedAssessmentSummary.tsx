@@ -6,6 +6,8 @@ import { usePdfGenerator } from './assessment/usePdfGenerator';
 import AssessmentSummaryCard from './assessment/AssessmentSummaryCard';
 import SectionStatisticsCard from './assessment/SectionStatisticsCard';
 import DetailedResultsTable from './assessment/DetailedResultsTable';
+import { AlertTriangle, Info } from 'lucide-react';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 
 const DetailedAssessmentSummary: React.FC<DetailedAssessmentSummaryProps> = ({
   credibilityScore,
@@ -15,7 +17,11 @@ const DetailedAssessmentSummary: React.FC<DetailedAssessmentSummaryProps> = ({
   sectionsProcessed,
   overallResult,
   redFlagTriggered,
-  reasoning
+  reasoning,
+  assessmentCompleteness,
+  processedQuestions,
+  totalQuestions,
+  wasTruncated
 }) => {
   const { questionResults, sectionStats, isLoading, assessmentData } = useAssessmentData(reportId);
   const { generatePdfReport, isGeneratingPdf } = usePdfGenerator();
@@ -43,9 +49,34 @@ const DetailedAssessmentSummary: React.FC<DetailedAssessmentSummaryProps> = ({
   const finalOverallResult = assessmentData?.overallResult || overallResult;
   const finalRedFlagTriggered = assessmentData?.redFlagTriggered || redFlagTriggered;
   const finalReasoning = assessmentData?.reasoning || reasoning;
+  const finalAssessmentCompleteness = assessmentData?.assessmentCompleteness || assessmentCompleteness;
+  const finalProcessedQuestions = assessmentData?.processedQuestions || processedQuestions;
+  const finalTotalQuestions = assessmentData?.totalQuestions || totalQuestions;
+  const finalWasTruncated = assessmentData?.wasTruncated || wasTruncated;
 
   return (
     <div className="space-y-6">
+      {/* Assessment Quality Indicators */}
+      {(finalAssessmentCompleteness !== undefined && finalAssessmentCompleteness < 100) && (
+        <Alert>
+          <Info className="h-4 w-4" />
+          <AlertDescription>
+            Assessment completeness: {finalAssessmentCompleteness}% 
+            ({finalProcessedQuestions}/{finalTotalQuestions} questions processed)
+            {finalAssessmentCompleteness < 80 && " - Consider reviewing results as assessment may be incomplete."}
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {finalWasTruncated && (
+        <Alert>
+          <AlertTriangle className="h-4 w-4" />
+          <AlertDescription>
+            Document was truncated due to size limits. Assessment is based on the first portion of the document.
+          </AlertDescription>
+        </Alert>
+      )}
+
       <AssessmentSummaryCard
         credibilityScore={credibilityScore}
         totalScore={totalScore}

@@ -15,6 +15,7 @@ export interface SectionStats {
   naCount: number;
   totalQuestions: number;
   yesPercentage: number;
+  completeness?: number; // Track section completeness
 }
 
 export interface AssessmentData {
@@ -28,6 +29,7 @@ export interface AssessmentData {
       score: number;
       weight: number;
     }>;
+    completeness?: number;
   }>;
   overallResult?: string;
   totalScore: number;
@@ -36,6 +38,10 @@ export interface AssessmentData {
   redFlagQuestions?: string[];
   reasoning?: string;
   questionnaire_version?: string;
+  assessmentCompleteness?: number; // Overall assessment completeness
+  processedQuestions?: number;
+  totalQuestions?: number;
+  wasTruncated?: boolean;
 }
 
 export interface DetailedAssessmentSummaryProps {
@@ -47,4 +53,8 @@ export interface DetailedAssessmentSummaryProps {
   overallResult?: string;
   redFlagTriggered?: boolean;
   reasoning?: string;
+  assessmentCompleteness?: number;
+  processedQuestions?: number;
+  totalQuestions?: number;
+  wasTruncated?: boolean;
 }
