@@ -19,8 +19,7 @@ export interface QuestionnaireResponse {
 export const getCredibilityQuestionnaire = async (): Promise<QuestionnaireResponse | null> => {
   try {
     const { data, error } = await supabase.functions.invoke('questionnaire-manager', {
-      method: 'GET',
-      body: null,
+      body: { action: 'retrieve' }
     });
 
     if (error) {
@@ -46,8 +45,8 @@ export const uploadCredibilityQuestionnaire = async (
 ): Promise<boolean> => {
   try {
     const { data, error } = await supabase.functions.invoke('questionnaire-manager', {
-      method: 'POST',
       body: {
+        action: 'upload',
         questionnaire_data: questionnaireData,
         version,
         description

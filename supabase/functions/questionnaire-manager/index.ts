@@ -19,12 +19,20 @@ serve(async (req) => {
     )
 
     const { method } = req
-    const url = new URL(req.url)
-    const action = url.searchParams.get('action')
+    let action: string | null = null;
+    let requestData: any = {};
+
+    // Parse request body for action and data
+    if (method === 'POST') {
+      requestData = await req.json()
+      action = requestData.action
+    }
+
+    console.log('Request method:', method, 'Action:', action)
 
     if (method === 'POST' && action === 'upload') {
       // Upload questionnaire file
-      const { questionnaire_data, version = '1.0', description } = await req.json()
+      const { questionnaire_data, version = '1.0', description } = requestData
       
       if (!questionnaire_data) {
         return new Response(
@@ -47,7 +55,7 @@ serve(async (req) => {
       if (uploadError) {
         console.error('Upload error:', uploadError)
         return new Response(
-          JSON.stringify({ error: 'Failed to upload questionnaire' }),
+          JSON.stringify({ error: 'Failed to upload questionnaire', details: uploadError.message }),
           { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
       }
@@ -72,7 +80,7 @@ serve(async (req) => {
       if (metadataError) {
         console.error('Metadata error:', metadataError)
         return new Response(
-          JSON.stringify({ error: 'Failed to save metadata' }),
+          JSON.stringify({ error: 'Failed to save metadata', details: metadataError.message }),
           { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
       }
@@ -87,7 +95,7 @@ serve(async (req) => {
       )
     }
 
-    if (method === 'GET' && action === 'retrieve') {
+    if (action === 'retrieve') {
       // Get active questionnaire
       const { data: metadata, error: metadataError } = await supabaseClient
         .from('questionnaire_metadata')
@@ -132,14 +140,14 @@ serve(async (req) => {
     }
 
     return new Response(
-      JSON.stringify({ error: 'Invalid action. Use ?action=upload or ?action=retrieve' }),
+      JSON.stringify({ error: 'Invalid action. Use action: "upload" or "retrieve" in request body' }),
       { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
 
   } catch (error) {
     console.error('Function error:', error)
     return new Response(
-      JSON.stringify({ error: 'Internal server error' }),
+      JSON.stringify({ error: 'Internal server error', details: error.message }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
