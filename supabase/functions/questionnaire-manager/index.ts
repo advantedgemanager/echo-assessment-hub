@@ -1,4 +1,3 @@
-
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -31,21 +30,56 @@ serve(async (req) => {
           throw new Error('Missing questionnaire data');
         }
 
+        console.log('Raw questionnaire data structure:', JSON.stringify({
+          hasTransitionPlan: !!questionnaire_data.transition_plan_questionnaire,
+          hasSections: !!questionnaire_data.sections,
+          hasBasicSections: !!questionnaire_data.basic_assessment_sections,
+          topLevelKeys: Object.keys(questionnaire_data)
+        }, null, 2));
+
         let questionnaire;
         let finalVersion;
         let totalQuestions = 0;
 
-        // Handle different input formats with enhanced validation
+        // FIXED: Transform the structure FIRST, then validate
+        // Handle different input formats with enhanced validation and transformation
         if (questionnaire_data.transition_plan_questionnaire) {
           // Format 1: Nested structure
-          questionnaire = questionnaire_data.transition_plan_questionnaire;
-          finalVersion = version || questionnaire.metadata?.version || '4.0';
+          console.log('Processing Format 1: Nested transition_plan_questionnaire structure');
+          const nestedData = questionnaire_data.transition_plan_questionnaire;
+          
+          if (nestedData.basic_assessment_sections) {
+            // Transform legacy nested structure
+            questionnaire = {
+              title: 'Enhanced Transition Plan Credibility Assessment',
+              description: 'Comprehensive 265-question credibility assessment questionnaire',
+              sections: []
+            };
+            
+            for (const [sectionKey, sectionData] of Object.entries(nestedData.basic_assessment_sections)) {
+              const section = {
+                id: sectionKey,
+                title: sectionData.title,
+                description: sectionData.description,
+                questions: sectionData.questions || []
+              };
+              questionnaire.sections.push(section);
+              totalQuestions += section.questions.length;
+            }
+          } else if (nestedData.sections) {
+            questionnaire = nestedData;
+          } else {
+            questionnaire = nestedData;
+          }
+          finalVersion = version || nestedData.metadata?.version || '4.0';
         } else if (questionnaire_data.sections) {
-          // Format 2: Direct structure
+          // Format 2: Direct structure with sections
+          console.log('Processing Format 2: Direct sections structure');
           questionnaire = questionnaire_data;
           finalVersion = version || questionnaire.version || '4.0';
         } else if (questionnaire_data.basic_assessment_sections) {
           // Format 3: Legacy structure - transform it
+          console.log('Processing Format 3: Legacy basic_assessment_sections structure');
           questionnaire = {
             title: 'Enhanced Transition Plan Credibility Assessment',
             description: 'Comprehensive 265-question credibility assessment questionnaire',
@@ -65,14 +99,61 @@ serve(async (req) => {
           
           finalVersion = version || '4.0';
         } else {
-          throw new Error('Invalid questionnaire format: unrecognized structure');
+          // Try to handle any other structure by checking for nested data
+          console.log('Processing unknown format, attempting auto-detection...');
+          const keys = Object.keys(questionnaire_data);
+          console.log('Available keys:', keys);
+          
+          // Look for any nested questionnaire data
+          let foundData = null;
+          for (const key of keys) {
+            const value = questionnaire_data[key];
+            if (value && typeof value === 'object' && (value.sections || value.basic_assessment_sections)) {
+              foundData = value;
+              console.log(`Found questionnaire data in key: ${key}`);
+              break;
+            }
+          }
+          
+          if (foundData) {
+            if (foundData.basic_assessment_sections) {
+              questionnaire = {
+                title: 'Enhanced Transition Plan Credibility Assessment',
+                description: 'Comprehensive credibility assessment questionnaire',
+                sections: []
+              };
+              
+              for (const [sectionKey, sectionData] of Object.entries(foundData.basic_assessment_sections)) {
+                const section = {
+                  id: sectionKey,
+                  title: sectionData.title,
+                  description: sectionData.description,
+                  questions: sectionData.questions || []
+                };
+                questionnaire.sections.push(section);
+                totalQuestions += section.questions.length;
+              }
+            } else {
+              questionnaire = foundData;
+            }
+            finalVersion = version || foundData.version || '4.0';
+          } else {
+            throw new Error(`Invalid questionnaire format: unrecognized structure. Available keys: ${keys.join(', ')}`);
+          }
         }
 
+        // NOW validate the transformed structure
         if (!questionnaire.sections || !Array.isArray(questionnaire.sections)) {
-          throw new Error('Invalid questionnaire format: missing sections array');
+          console.error('Validation failed - questionnaire structure:', JSON.stringify({
+            hasSections: !!questionnaire.sections,
+            sectionsType: typeof questionnaire.sections,
+            isArray: Array.isArray(questionnaire.sections),
+            questionnaireKeys: Object.keys(questionnaire)
+          }, null, 2));
+          throw new Error('Invalid questionnaire format: missing or invalid sections array after transformation');
         }
 
-        // Count total questions for validation
+        // Count total questions for validation if not already counted
         if (totalQuestions === 0) {
           questionnaire.sections.forEach(section => {
             if (section.questions && Array.isArray(section.questions)) {
@@ -157,11 +238,13 @@ serve(async (req) => {
 
       } catch (uploadError) {
         console.error('Error processing enhanced upload:', uploadError);
+        console.error('Error stack:', uploadError.stack);
         return new Response(
           JSON.stringify({ 
             error: uploadError.message,
             success: false,
-            action: 'upload'
+            action: 'upload',
+            details: uploadError.stack
           }),
           {
             status: 400,
@@ -356,7 +439,8 @@ serve(async (req) => {
     return new Response(
       JSON.stringify({ 
         error: error.message,
-        success: false
+        success: false,
+        details: error.stack
       }),
       {
         status: 500,

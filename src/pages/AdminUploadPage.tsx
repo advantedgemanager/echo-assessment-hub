@@ -33,35 +33,54 @@ const AdminUploadPage = () => {
   };
 
   const validateQuestionnaireStructure = (data: any): boolean => {
-    // Basic validation of the questionnaire structure
-    if (!data.transition_plan_questionnaire) {
-      setErrorMessage('Invalid questionnaire format: missing transition_plan_questionnaire');
-      return false;
-    }
+    console.log('Validating questionnaire structure:', {
+      topLevelKeys: Object.keys(data),
+      hasTransitionPlan: !!data.transition_plan_questionnaire,
+      hasSections: !!data.sections,
+      hasBasicSections: !!data.basic_assessment_sections
+    });
 
-    const questionnaire = data.transition_plan_questionnaire;
-    
-    if (!questionnaire.metadata) {
-      setErrorMessage('Invalid questionnaire format: missing metadata');
-      return false;
-    }
-
-    if (!questionnaire.basic_assessment_sections) {
-      setErrorMessage('Invalid questionnaire format: missing basic_assessment_sections');
-      return false;
-    }
-
-    // Check if sections have questions
-    const sections = questionnaire.basic_assessment_sections;
-    for (const sectionKey of Object.keys(sections)) {
-      const section = sections[sectionKey];
-      if (!section.questions || !Array.isArray(section.questions)) {
-        setErrorMessage(`Invalid questionnaire format: section ${sectionKey} missing questions array`);
+    // Enhanced validation - accept multiple formats
+    if (data.transition_plan_questionnaire) {
+      const questionnaire = data.transition_plan_questionnaire;
+      console.log('Found nested transition_plan_questionnaire structure');
+      
+      if (!questionnaire.metadata && !questionnaire.basic_assessment_sections && !questionnaire.sections) {
+        setErrorMessage('Invalid questionnaire format: nested structure missing required sections');
         return false;
+      }
+      return true;
+    }
+
+    if (data.sections && Array.isArray(data.sections)) {
+      console.log('Found direct sections structure');
+      return true;
+    }
+
+    if (data.basic_assessment_sections) {
+      console.log('Found basic_assessment_sections structure');
+      const sections = data.basic_assessment_sections;
+      for (const sectionKey of Object.keys(sections)) {
+        const section = sections[sectionKey];
+        if (!section.questions || !Array.isArray(section.questions)) {
+          setErrorMessage(`Invalid questionnaire format: section ${sectionKey} missing questions array`);
+          return false;
+        }
+      }
+      return true;
+    }
+
+    // Look for any nested questionnaire structure
+    for (const key of Object.keys(data)) {
+      const value = data[key];
+      if (value && typeof value === 'object' && (value.sections || value.basic_assessment_sections)) {
+        console.log(`Found questionnaire data in nested key: ${key}`);
+        return true;
       }
     }
 
-    return true;
+    setErrorMessage(`Invalid questionnaire format: no recognized structure found. Available keys: ${Object.keys(data).join(', ')}`);
+    return false;
   };
 
   const handleUpload = async () => {
@@ -87,7 +106,10 @@ const AdminUploadPage = () => {
       let questionnaireData;
       try {
         questionnaireData = JSON.parse(fileContent);
-        console.log('JSON parsed successfully');
+        console.log('JSON parsed successfully, structure preview:', {
+          topLevelKeys: Object.keys(questionnaireData),
+          fileSize: fileContent.length
+        });
       } catch (parseError) {
         console.error('JSON parse error:', parseError);
         throw new Error('Invalid JSON format');
@@ -220,13 +242,13 @@ const AdminUploadPage = () => {
         </Card>
 
         <div className="mt-8 p-4 bg-muted rounded-lg">
-          <h3 className="font-semibold mb-2">Instructions:</h3>
+          <h3 className="font-semibold mb-2">Supported Formats:</h3>
           <ul className="text-sm text-muted-foreground space-y-1">
-            <li>• Upload a valid JSON file containing the questionnaire data</li>
-            <li>• The file will be validated before upload</li>
-            <li>• Once uploaded, the questionnaire becomes active for AI assessments</li>
-            <li>• Previous versions will be automatically deactivated</li>
-            <li>• Check the browser console for detailed error messages if upload fails</li>
+            <li>• <strong>Format 1:</strong> {"{ transition_plan_questionnaire: { basic_assessment_sections: {...} } }"}</li>
+            <li>• <strong>Format 2:</strong> {"{ sections: [...] }"}</li>
+            <li>• <strong>Format 3:</strong> {"{ basic_assessment_sections: {...} }"}</li>
+            <li>• The system will automatically detect and transform your format</li>
+            <li>• Check browser console for detailed validation logs</li>
           </ul>
         </div>
       </div>
