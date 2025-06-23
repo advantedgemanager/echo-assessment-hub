@@ -15,10 +15,14 @@ serve(async (req) => {
 
   try {
     const requestBody = await req.json();
-    console.log('🔍 Raw request body:', JSON.stringify(requestBody, null, 2));
+    console.log('🔍 Request received:', {
+      action: requestBody.action,
+      hasQuestionnaireData: !!requestBody.questionnaire_data,
+      topLevelKeys: requestBody.questionnaire_data ? Object.keys(requestBody.questionnaire_data) : []
+    });
     
     const { action, questionnaire_data, version, description } = requestBody;
-    console.log(`🚀 Questionnaire manager v4.0 - Action: ${action}`);
+    console.log(`🚀 Questionnaire manager v5.0 - Action: ${action}`);
 
     // Initialize Supabase client
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
@@ -26,7 +30,7 @@ serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     if (action === 'upload') {
-      console.log('=== Questionnaire Upload v4.0 ===');
+      console.log('=== Questionnaire Upload v5.0 ===');
       
       try {
         if (!questionnaire_data) {
@@ -34,45 +38,84 @@ serve(async (req) => {
         }
 
         console.log('📋 Analyzing questionnaire structure...');
-        console.log('Top-level keys:', Object.keys(questionnaire_data));
+        console.log('Available top-level keys:', Object.keys(questionnaire_data));
 
         let transformedQuestionnaire;
-        let finalVersion = version || '4.0';
+        let finalVersion = version || '5.0';
         let totalQuestions = 0;
 
-        // Enhanced structure detection and transformation
-        if (questionnaire_data.transition_plan_credibility_questionnaire) {
-          console.log('📋 Processing transition_plan_credibility_questionnaire format');
-          const credibilityData = questionnaire_data.transition_plan_credibility_questionnaire;
-          console.log('Credibility data keys:', Object.keys(credibilityData));
+        // Handle nested transition_plan_questionnaire structure
+        if (questionnaire_data.transition_plan_questionnaire) {
+          console.log('📋 Processing nested transition_plan_questionnaire format');
+          const tpq = questionnaire_data.transition_plan_questionnaire;
           
-          if (credibilityData.sections && typeof credibilityData.sections === 'object') {
-            console.log('🔧 Converting sections object to array format');
+          console.log('TPQ structure keys:', Object.keys(tpq));
+          
+          // Extract metadata if available
+          const metadata = tpq.metadata || {};
+          const title = metadata.title || 'Transition Plan Credibility Assessment';
+          const desc = metadata.description || 'Comprehensive credibility assessment questionnaire';
+          
+          let sectionsArray = [];
+          
+          // Handle basic_assessment_sections (object format)
+          if (tpq.basic_assessment_sections) {
+            console.log('🔧 Converting basic_assessment_sections object to array format');
+            const sections = tpq.basic_assessment_sections;
             
-            const sectionsArray = [];
-            for (const [sectionKey, sectionData] of Object.entries(credibilityData.sections)) {
-              if (sectionData && typeof sectionData === 'object' && Array.isArray(sectionData.questions)) {
+            for (const [sectionKey, sectionData] of Object.entries(sections)) {
+              if (sectionData && typeof sectionData === 'object') {
                 const section = {
                   id: sectionKey,
                   title: sectionData.title || sectionKey.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
                   description: sectionData.description || '',
-                  questions: sectionData.questions
+                  questions: sectionData.questions || []
                 };
                 sectionsArray.push(section);
+                totalQuestions += section.questions.length;
                 console.log(`✅ Section ${sectionKey}: ${section.questions.length} questions`);
               }
             }
-            
-            transformedQuestionnaire = {
-              version: finalVersion,
-              title: credibilityData.title || 'Transition Plan Credibility Assessment',
-              description: credibilityData.description || 'Comprehensive credibility assessment questionnaire',
-              sections: sectionsArray
-            };
-          } else {
-            throw new Error('Invalid credibility questionnaire format: sections must be an object with question arrays');
           }
-        } else if (questionnaire_data.sections && Array.isArray(questionnaire_data.sections)) {
+          // Handle direct sections array
+          else if (tpq.sections && Array.isArray(tpq.sections)) {
+            console.log('📋 Using direct sections array');
+            sectionsArray = tpq.sections;
+            totalQuestions = sectionsArray.reduce((total, section) => {
+              return total + (section.questions ? section.questions.length : 0);
+            }, 0);
+          }
+          // Handle sections as object (convert to array)
+          else if (tpq.sections && typeof tpq.sections === 'object') {
+            console.log('🔧 Converting sections object to array format');
+            for (const [sectionKey, sectionData] of Object.entries(tpq.sections)) {
+              if (sectionData && typeof sectionData === 'object') {
+                const section = {
+                  id: sectionKey,
+                  title: sectionData.title || sectionKey.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+                  description: sectionData.description || '',
+                  questions: sectionData.questions || []
+                };
+                sectionsArray.push(section);
+                totalQuestions += section.questions.length;
+                console.log(`✅ Section ${sectionKey}: ${section.questions.length} questions`);
+              }
+            }
+          }
+          
+          if (sectionsArray.length === 0) {
+            throw new Error('No valid sections found in transition_plan_questionnaire structure');
+          }
+          
+          transformedQuestionnaire = {
+            version: finalVersion,
+            title: title,
+            description: desc,
+            sections: sectionsArray
+          };
+        }
+        // Handle direct sections array format
+        else if (questionnaire_data.sections && Array.isArray(questionnaire_data.sections)) {
           console.log('📋 Processing direct sections array format');
           transformedQuestionnaire = {
             version: finalVersion,
@@ -80,26 +123,26 @@ serve(async (req) => {
             description: questionnaire_data.description || 'Comprehensive credibility assessment questionnaire',
             sections: questionnaire_data.sections
           };
-        } else {
-          throw new Error(`Unsupported questionnaire format. Available keys: ${Object.keys(questionnaire_data).join(', ')}`);
+          totalQuestions = transformedQuestionnaire.sections.reduce((total, section) => {
+            return total + (section.questions ? section.questions.length : 0);
+          }, 0);
+        }
+        else {
+          const availableKeys = Object.keys(questionnaire_data);
+          console.error('❌ Unsupported questionnaire format. Available keys:', availableKeys);
+          throw new Error(`Unsupported questionnaire format. Available keys: ${availableKeys.join(', ')}`);
         }
 
-        // Validate the transformed questionnaire
+        // Final validation
         if (!transformedQuestionnaire.sections || !Array.isArray(transformedQuestionnaire.sections)) {
           console.error('❌ Transformation failed: sections is not an array');
-          console.error('Transformed structure:', JSON.stringify(transformedQuestionnaire, null, 2));
           throw new Error('Questionnaire transformation failed: sections must be an array');
         }
 
-        // Count total questions
-        totalQuestions = transformedQuestionnaire.sections.reduce((total, section) => {
-          if (section.questions && Array.isArray(section.questions)) {
-            return total + section.questions.length;
-          }
-          return total;
-        }, 0);
-
-        console.log(`✅ Questionnaire validated: ${transformedQuestionnaire.sections.length} sections, ${totalQuestions} questions`);
+        console.log(`✅ Questionnaire transformed successfully:`);
+        console.log(`   - Sections: ${transformedQuestionnaire.sections.length}`);
+        console.log(`   - Total Questions: ${totalQuestions}`);
+        console.log(`   - Title: ${transformedQuestionnaire.title}`);
 
         if (totalQuestions === 0) {
           throw new Error('No questions found in questionnaire sections');
@@ -152,13 +195,12 @@ serve(async (req) => {
           throw new Error(`Failed to save questionnaire: ${insertError.message}`);
         }
 
-        console.log('🎉 Questionnaire uploaded successfully:', {
-          id: insertData.id,
-          version: finalVersion,
-          totalQuestions: totalQuestions,
-          sections: transformedQuestionnaire.sections.length,
-          isActive: insertData.is_active
-        });
+        console.log('🎉 Questionnaire uploaded successfully!');
+        console.log(`   - ID: ${insertData.id}`);
+        console.log(`   - Version: ${finalVersion}`);
+        console.log(`   - Questions: ${totalQuestions}`);
+        console.log(`   - Sections: ${transformedQuestionnaire.sections.length}`);
+        console.log(`   - Active: ${insertData.is_active}`);
 
         return new Response(JSON.stringify({ 
           success: true, 
@@ -174,7 +216,11 @@ serve(async (req) => {
 
       } catch (uploadError) {
         console.error('❌ Upload processing error:', uploadError);
-        console.error('Error stack:', uploadError.stack);
+        console.error('Error details:', {
+          message: uploadError.message,
+          stack: uploadError.stack
+        });
+        
         return new Response(
           JSON.stringify({ 
             error: uploadError.message,
@@ -191,7 +237,7 @@ serve(async (req) => {
     }
 
     if (action === 'retrieve') {
-      console.log('=== Questionnaire Retrieval v4.0 ===');
+      console.log('=== Questionnaire Retrieval v5.0 ===');
       
       try {
         const { data: activeQuestionnaire, error: dbError } = await supabase
@@ -202,7 +248,12 @@ serve(async (req) => {
           .limit(1)
           .maybeSingle();
 
-        if (!dbError && activeQuestionnaire) {
+        if (dbError) {
+          console.error('Database error:', dbError);
+          throw new Error(`Database error: ${dbError.message}`);
+        }
+
+        if (activeQuestionnaire) {
           const questionnaireData = activeQuestionnaire.questionnaire_data;
           console.log(`✅ Found active questionnaire: version ${activeQuestionnaire.version}`);
           console.log(`📊 Details: ${questionnaireData?.sections?.length || 0} sections, ${questionnaireData?.totalQuestions || 'unknown'} questions`);
@@ -222,11 +273,11 @@ serve(async (req) => {
           });
         }
 
-        console.log('⚠️ No active questionnaire found, loading fallback...');
+        console.log('⚠️ No active questionnaire found, returning fallback...');
         
         // Fallback questionnaire
         const fallbackQuestionnaire = {
-          version: "4.0",
+          version: "5.0",
           title: "Fallback Transition Plan Assessment",
           description: "Basic fallback questionnaire",
           totalQuestions: 4,
@@ -273,7 +324,7 @@ serve(async (req) => {
         return new Response(JSON.stringify({
           questionnaire: fallbackQuestionnaire,
           metadata: {
-            version: '4.0',
+            version: '5.0',
             uploaded_at: new Date().toISOString(),
             description: 'Fallback questionnaire',
             totalQuestions: 4,
@@ -302,7 +353,7 @@ serve(async (req) => {
     );
 
   } catch (error) {
-    console.error('❌ Error in questionnaire-manager v4.0:', error);
+    console.error('❌ Error in questionnaire-manager v5.0:', error);
     return new Response(
       JSON.stringify({ 
         error: error.message,
