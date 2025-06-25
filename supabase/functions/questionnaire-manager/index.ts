@@ -1,4 +1,3 @@
-
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -6,6 +5,17 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+};
+
+// Load the questionnaire from the JSON file
+const loadQuestionnaireFromFile = async () => {
+  try {
+    const questionnaireText = await Deno.readTextFile('./complete_transition_questionnaire.json');
+    return JSON.parse(questionnaireText);
+  } catch (error) {
+    console.error('Error loading questionnaire from file:', error);
+    return null;
+  }
 };
 
 serve(async (req) => {
@@ -22,7 +32,7 @@ serve(async (req) => {
     });
     
     const { action, questionnaire_data, version, description } = requestBody;
-    console.log(`🚀 Questionnaire manager v5.0 - Action: ${action}`);
+    console.log(`🚀 Questionnaire manager v6.0 - Action: ${action}`);
 
     // Initialize Supabase client
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
@@ -30,7 +40,7 @@ serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     if (action === 'upload') {
-      console.log('=== Questionnaire Upload v5.0 ===');
+      console.log('=== Questionnaire Upload v6.0 ===');
       
       try {
         if (!questionnaire_data) {
@@ -41,7 +51,7 @@ serve(async (req) => {
         console.log('Available top-level keys:', Object.keys(questionnaire_data));
 
         let transformedQuestionnaire;
-        let finalVersion = version || '5.0';
+        let finalVersion = version || '6.0';
         let totalQuestions = 0;
 
         // Handle nested transition_plan_questionnaire structure
@@ -237,9 +247,10 @@ serve(async (req) => {
     }
 
     if (action === 'retrieve') {
-      console.log('=== Questionnaire Retrieval v5.0 ===');
+      console.log('=== Questionnaire Retrieval v6.0 ===');
       
       try {
+        // First try to get from database
         const { data: activeQuestionnaire, error: dbError } = await supabase
           .from('questionnaire_metadata')
           .select('*')
@@ -250,12 +261,12 @@ serve(async (req) => {
 
         if (dbError) {
           console.error('Database error:', dbError);
-          throw new Error(`Database error: ${dbError.message}`);
+          // Don't throw, continue to try loading from file
         }
 
         if (activeQuestionnaire) {
           const questionnaireData = activeQuestionnaire.questionnaire_data;
-          console.log(`✅ Found active questionnaire: version ${activeQuestionnaire.version}`);
+          console.log(`✅ Found active questionnaire in database: version ${activeQuestionnaire.version}`);
           console.log(`📊 Details: ${questionnaireData?.sections?.length || 0} sections, ${questionnaireData?.totalQuestions || 'unknown'} questions`);
           
           return new Response(JSON.stringify({
@@ -273,11 +284,51 @@ serve(async (req) => {
           });
         }
 
-        console.log('⚠️ No active questionnaire found, returning fallback...');
+        // If no questionnaire in database, try to load from file
+        console.log('📄 No active questionnaire in database, loading from JSON file...');
+        const fileQuestionnaire = await loadQuestionnaireFromFile();
+        
+        if (fileQuestionnaire) {
+          console.log(`✅ Loaded questionnaire from file: ${fileQuestionnaire.sections?.length || 0} sections`);
+          
+          // Calculate total questions
+          const totalQuestions = fileQuestionnaire.sections?.reduce((total, section) => {
+            return total + (section.questions ? section.questions.length : 0);
+          }, 0) || 0;
+
+          // Enhanced questionnaire structure with metadata
+          const enhancedQuestionnaire = {
+            version: fileQuestionnaire.version || "1.0",
+            title: fileQuestionnaire.title || "Transition Plan Credibility Assessment",
+            description: fileQuestionnaire.description || "Comprehensive credibility assessment questionnaire",
+            totalQuestions: totalQuestions,
+            sections: fileQuestionnaire.sections || [],
+            uploadedAt: new Date().toISOString(),
+            enhanced: true,
+            loadedFromFile: true
+          };
+
+          return new Response(JSON.stringify({
+            questionnaire: enhancedQuestionnaire,
+            metadata: {
+              version: enhancedQuestionnaire.version,
+              uploaded_at: enhancedQuestionnaire.uploadedAt,
+              description: enhancedQuestionnaire.description,
+              totalQuestions: enhancedQuestionnaire.totalQuestions,
+              enhanced: true,
+              is_active: false,
+              loadedFromFile: true
+            }
+          }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+
+        console.log('⚠️ No questionnaire found in database or file, returning fallback...');
         
         // Fallback questionnaire
         const fallbackQuestionnaire = {
-          version: "5.0",
+          version: "6.0",
           title: "Fallback Transition Plan Assessment",
           description: "Basic fallback questionnaire",
           totalQuestions: 4,
@@ -324,7 +375,7 @@ serve(async (req) => {
         return new Response(JSON.stringify({
           questionnaire: fallbackQuestionnaire,
           metadata: {
-            version: '5.0',
+            version: '6.0',
             uploaded_at: new Date().toISOString(),
             description: 'Fallback questionnaire',
             totalQuestions: 4,
@@ -353,7 +404,7 @@ serve(async (req) => {
     );
 
   } catch (error) {
-    console.error('❌ Error in questionnaire-manager v5.0:', error);
+    console.error('❌ Error in questionnaire-manager v6.0:', error);
     return new Response(
       JSON.stringify({ 
         error: error.message,
