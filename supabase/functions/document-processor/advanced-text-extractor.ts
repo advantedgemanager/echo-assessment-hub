@@ -1,73 +1,74 @@
 
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 
-// Import PDF parsing library
-const pdfParse = async (buffer: ArrayBuffer) => {
+// Enhanced PDF text extraction using multiple strategies
+const extractPdfText = async (buffer: ArrayBuffer): Promise<string> => {
   try {
-    // Use a more robust PDF parsing approach
     const uint8Array = new Uint8Array(buffer);
-    
-    // Look for text streams in PDF
     const decoder = new TextDecoder('utf-8', { fatal: false });
-    const pdfText = decoder.decode(uint8Array);
-    
-    // Advanced PDF text extraction patterns
-    const textPatterns = [
-      // Text between parentheses (most common)
-      /\(([^)]+)\)\s*Tj/gs,
-      // Text arrays
-      /\[([^\]]*)\]\s*TJ/gs,
-      // Direct text commands
-      /BT\s+([^ET]+)\s+ET/gs,
-      // Text after positioning
-      /Td\s+\(([^)]+)\)/gs,
-      // Text with font specifications
-      /Tf\s+\(([^)]+)\)/gs,
-    ];
+    const pdfContent = decoder.decode(uint8Array);
     
     let extractedText = '';
     
-    for (const pattern of textPatterns) {
-      const matches = pdfText.match(pattern);
-      if (matches) {
-        for (const match of matches) {
-          // Clean the match
-          const cleanText = match
-            .replace(/\(|\)|Tj|TJ|BT|ET|Td|Tf|\[|\]/g, ' ')
-            .replace(/\\[rn]/g, ' ')
-            .replace(/\s+/g, ' ')
-            .trim();
-          
-          if (cleanText.length > 3 && /[a-zA-Z]/.test(cleanText)) {
-            extractedText += cleanText + ' ';
+    // Strategy 1: Extract text from text objects (BT...ET blocks)
+    const textObjectPattern = /BT\s+(.*?)\s+ET/gs;
+    const textObjects = pdfContent.match(textObjectPattern) || [];
+    
+    for (const textObj of textObjects) {
+      // Extract text from parentheses and brackets
+      const textMatches = textObj.match(/\(([^)]*)\)|<([^>]*)>/g) || [];
+      for (const match of textMatches) {
+        const cleanText = match.replace(/[()<>]/g, '').trim();
+        if (cleanText.length > 2 && /[a-zA-Z]/.test(cleanText)) {
+          extractedText += cleanText + ' ';
+        }
+      }
+    }
+    
+    // Strategy 2: Extract from text positioning commands
+    const textCommands = [
+      /Tj\s*\(([^)]+)\)/gs,
+      /TJ\s*\[([^\]]+)\]/gs,
+      /'([^']+)'\s*Tj/gs,
+      /\"([^"]+)\"\s*Tj/gs
+    ];
+    
+    for (const pattern of textCommands) {
+      const matches = pdfContent.match(pattern) || [];
+      for (const match of matches) {
+        const textMatch = match.match(/\(([^)]+)\)|'([^']+)'|"([^"]+)"/);
+        if (textMatch) {
+          const text = textMatch[1] || textMatch[2] || textMatch[3];
+          if (text && text.length > 2 && /[a-zA-Z]/.test(text)) {
+            extractedText += text + ' ';
           }
         }
       }
     }
     
-    // If no structured text found, try alternative approach
-    if (extractedText.length < 100) {
-      // Look for readable text patterns
-      const readableText = pdfText
-        .split(/[\r\n]+/)
-        .map(line => line.trim())
-        .filter(line => {
-          // Filter lines that look like readable text
-          return line.length > 10 && 
-                 /[a-zA-Z]/.test(line) && 
-                 !/^[\d\s\-.,()]+$/.test(line) &&
-                 !line.includes('obj') &&
-                 !line.includes('endobj') &&
-                 !line.includes('stream');
-        })
-        .join(' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-      
-      if (readableText.length > extractedText.length) {
-        extractedText = readableText;
+    // Strategy 3: Look for stream content with text
+    const streamPattern = /stream\s+(.*?)\s+endstream/gs;
+    const streams = pdfContent.match(streamPattern) || [];
+    
+    for (const stream of streams) {
+      const streamContent = stream.replace(/stream|endstream/g, '').trim();
+      // Look for readable text patterns in streams
+      const readableMatches = streamContent.match(/[a-zA-Z][a-zA-Z\s]{10,}/g) || [];
+      for (const text of readableMatches) {
+        if (!text.includes('obj') && !text.includes('endobj')) {
+          extractedText += text + ' ';
+        }
       }
     }
+    
+    // Clean up the extracted text
+    extractedText = extractedText
+      .replace(/\\[nr]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    
+    console.log(`PDF extraction result: ${extractedText.length} characters`);
+    console.log(`Sample: ${extractedText.substring(0, 200)}...`);
     
     return extractedText;
   } catch (error) {
@@ -76,37 +77,84 @@ const pdfParse = async (buffer: ArrayBuffer) => {
   }
 };
 
-// DOCX text extraction using a more sophisticated approach
+// Enhanced DOCX text extraction by parsing the XML structure
 const extractDocxText = async (buffer: ArrayBuffer): Promise<string> => {
   try {
+    // DOCX files are ZIP archives containing XML files
+    // We need to extract and parse the document.xml file
+    
     const uint8Array = new Uint8Array(buffer);
     
-    // DOCX is a ZIP file, we need to extract document.xml
+    // Look for the document.xml content within the ZIP structure
+    // Find the start of document.xml content
+    let documentXmlStart = -1;
+    let documentXmlEnd = -1;
+    
+    // Convert to string to search for XML patterns
     const decoder = new TextDecoder('utf-8', { fatal: false });
-    const docxContent = decoder.decode(uint8Array);
+    const content = decoder.decode(uint8Array);
     
-    // Look for XML content within the DOCX structure
-    let extractedText = '';
-    
-    // More sophisticated patterns for DOCX text extraction
-    const textPatterns = [
-      // Text within w:t tags (Word text elements)
-      /<w:t[^>]*>([^<]+)<\/w:t>/g,
-      // Text within w:p tags (paragraphs)
-      /<w:p[^>]*>.*?<w:t[^>]*>([^<]+)<\/w:t>.*?<\/w:p>/g,
-      // Direct text content
-      /<text[^>]*>([^<]+)<\/text>/g,
-      // Alternative text patterns
-      />\s*([A-Za-z][^<>{}\[\]]{10,})\s*</g,
+    // Look for word processing document content
+    const xmlPatterns = [
+      /<w:document[^>]*>.*?<\/w:document>/gs,
+      /<w:body[^>]*>.*?<\/w:body>/gs,
+      /<w:p[^>]*>.*?<\/w:p>/gs
     ];
     
-    for (const pattern of textPatterns) {
-      let match;
-      while ((match = pattern.exec(docxContent)) !== null) {
-        const text = match[1];
-        if (text && text.trim().length > 5 && /[a-zA-Z]/.test(text)) {
-          extractedText += text.trim() + ' ';
+    let extractedText = '';
+    
+    // Strategy 1: Extract from word processing XML tags
+    for (const pattern of xmlPatterns) {
+      const matches = content.match(pattern) || [];
+      for (const match of matches) {
+        // Extract text from w:t tags (Word text elements)
+        const textMatches = match.match(/<w:t[^>]*>([^<]+)<\/w:t>/g) || [];
+        for (const textMatch of textMatches) {
+          const text = textMatch.replace(/<[^>]*>/g, '').trim();
+          if (text.length > 1 && /[a-zA-Z]/.test(text)) {
+            extractedText += text + ' ';
+          }
         }
+      }
+    }
+    
+    // Strategy 2: Look for any readable text between angle brackets
+    if (extractedText.length < 100) {
+      const readableTextPattern = />([^<>{}\[\]]{15,})</g;
+      const readableMatches = content.match(readableTextPattern) || [];
+      
+      for (const match of readableMatches) {
+        const text = match.replace(/[><]/g, '').trim();
+        if (text.length > 10 && 
+            /[a-zA-Z]{3,}/.test(text) &&
+            !text.includes('xml') &&
+            !text.includes('word') &&
+            !text.includes('rels') &&
+            !text.includes('Content_Types') &&
+            !/^[\d\s\-.,()]+$/.test(text)) {
+          extractedText += text + ' ';
+        }
+      }
+    }
+    
+    // Strategy 3: Extract from plain text between XML elements
+    if (extractedText.length < 100) {
+      // Remove all XML tags and extract readable content
+      const textOnly = content
+        .replace(/<[^>]*>/g, ' ')
+        .replace(/[{}[\]()]/g, ' ')
+        .split(/\s+/)
+        .filter(word => 
+          word.length > 3 && 
+          /[a-zA-Z]/.test(word) &&
+          !word.includes('xml') &&
+          !word.includes('docx') &&
+          !word.includes('word')
+        )
+        .join(' ');
+      
+      if (textOnly.length > extractedText.length) {
+        extractedText = textOnly;
       }
     }
     
@@ -116,29 +164,8 @@ const extractDocxText = async (buffer: ArrayBuffer): Promise<string> => {
       .replace(/\n\s*\n/g, '\n')
       .trim();
     
-    // If still no good text, try a more aggressive approach
-    if (extractedText.length < 100) {
-      // Look for any readable text sequences
-      const readableChunks = docxContent
-        .split(/[<>{}[\]()]+/)
-        .filter(chunk => {
-          const trimmed = chunk.trim();
-          return trimmed.length > 15 && 
-                 /[a-zA-Z]{3,}/.test(trimmed) &&
-                 !trimmed.includes('xml') &&
-                 !trimmed.includes('word') &&
-                 !trimmed.includes('document') &&
-                 !/^[\d\s\-.,()]+$/.test(trimmed);
-        })
-        .map(chunk => chunk.trim())
-        .join(' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-      
-      if (readableChunks.length > extractedText.length) {
-        extractedText = readableChunks;
-      }
-    }
+    console.log(`DOCX extraction result: ${extractedText.length} characters`);
+    console.log(`Sample: ${extractedText.substring(0, 200)}...`);
     
     return extractedText;
   } catch (error) {
@@ -148,41 +175,37 @@ const extractDocxText = async (buffer: ArrayBuffer): Promise<string> => {
 };
 
 export const extractTextFromPdfAdvanced = async (arrayBuffer: ArrayBuffer): Promise<string> => {
-  console.log('🔍 Starting advanced PDF text extraction...');
+  console.log('🔍 Starting enhanced PDF text extraction...');
   
   try {
-    const extractedText = await pdfParse(arrayBuffer);
+    const extractedText = await extractPdfText(arrayBuffer);
     
     if (extractedText.length < 50) {
-      throw new Error('Unable to extract sufficient text from PDF. The document may be image-based or corrupted.');
+      throw new Error('Unable to extract sufficient readable text from PDF. The document may be image-based, corrupted, or password-protected.');
     }
     
-    console.log(`✅ Advanced PDF extraction successful: ${extractedText.length} characters`);
-    console.log(`📄 Sample text: ${extractedText.substring(0, 200)}...`);
-    
+    console.log(`✅ Enhanced PDF extraction successful: ${extractedText.length} characters`);
     return extractedText;
   } catch (error) {
-    console.error('❌ Advanced PDF extraction failed:', error);
+    console.error('❌ Enhanced PDF extraction failed:', error);
     throw error;
   }
 };
 
 export const extractTextFromDocxAdvanced = async (arrayBuffer: ArrayBuffer): Promise<string> => {
-  console.log('🔍 Starting advanced DOCX text extraction...');
+  console.log('🔍 Starting enhanced DOCX text extraction...');
   
   try {
     const extractedText = await extractDocxText(arrayBuffer);
     
     if (extractedText.length < 50) {
-      throw new Error('Unable to extract sufficient text from DOCX. The document may be corrupted or empty.');
+      throw new Error('Unable to extract sufficient readable text from DOCX. The document may be corrupted, empty, or in an unsupported format.');
     }
     
-    console.log(`✅ Advanced DOCX extraction successful: ${extractedText.length} characters`);
-    console.log(`📄 Sample text: ${extractedText.substring(0, 200)}...`);
-    
+    console.log(`✅ Enhanced DOCX extraction successful: ${extractedText.length} characters`);
     return extractedText;
   } catch (error) {
-    console.error('❌ Advanced DOCX extraction failed:', error);
+    console.error('❌ Enhanced DOCX extraction failed:', error);
     throw error;
   }
 };
