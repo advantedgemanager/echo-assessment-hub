@@ -46,11 +46,11 @@ export const useChunkedAssessment = () => {
     try {
       setAssessmentState({
         status: 'processing',
-        progress: 5,
-        currentStep: 'Initializing assessment...',
+        progress: 10,
+        currentStep: 'Starting document assessment...',
         error: null,
         currentBatch: 0,
-        totalBatches: 0,
+        totalBatches: 1,
         processedQuestions: 0,
         totalQuestions: 0,
         results: null
@@ -77,47 +77,74 @@ export const useChunkedAssessment = () => {
 
   const processBatch = async (documentId: string, userId: string, batchNumber: number) => {
     try {
+      console.log(`Processing batch ${batchNumber} for document ${documentId}`);
+      
+      setAssessmentState(prev => ({
+        ...prev,
+        currentStep: 'Running AI assessment...',
+        progress: 30
+      }));
+
       const { data, error } = await supabase.functions.invoke('assess-document-chunked', {
-        body: { documentId, userId, batchNumber }
+        body: { documentId, userId, batchIndex: batchNumber }
       });
 
-      if (error || !data?.success) {
-        throw new Error(data?.error || 'Failed to process batch');
+      if (error) {
+        console.error('Invoke error:', error);
+        throw new Error(error.message || 'Failed to invoke assessment function');
       }
 
-      const progressPercentage = Math.round((data.processedQuestions / data.totalQuestions) * 100);
+      if (!data?.success) {
+        console.error('Assessment failed:', data);
+        throw new Error(data?.error || 'Assessment failed');
+      }
+
+      console.log('Assessment response:', data);
+
+      // Update progress based on completion
+      const progressPercentage = data.isComplete ? 100 : Math.min(90, 30 + (data.batchIndex * 20));
 
       setAssessmentState(prev => ({
         ...prev,
         progress: progressPercentage,
-        currentStep: `Processing questions ${data.processedQuestions}/${data.totalQuestions} (Batch ${data.batchNumber}/${data.totalBatches})`,
-        currentBatch: data.batchNumber,
-        totalBatches: data.totalBatches,
-        processedQuestions: data.processedQuestions,
-        totalQuestions: data.totalQuestions
+        currentStep: data.isComplete ? 'Assessment completed!' : `Processing batch ${data.batchIndex + 1}...`,
+        currentBatch: data.batchIndex,
+        totalBatches: 1,
+        processedQuestions: data.processedQuestions || 1,
+        totalQuestions: data.totalQuestions || 1
       }));
 
       if (data.isComplete) {
-        // Get final results
-        const finalResults = await getFinalResults(documentId, userId);
+        // Assessment completed successfully
+        const results = {
+          credibilityScore: data.credibilityScore,
+          totalScore: data.totalScore,
+          maxPossibleScore: data.maxPossibleScore,
+          reportId: data.reportId,
+          sectionsProcessed: data.sectionsProcessed
+        };
         
         setAssessmentState(prev => ({
           ...prev,
           status: 'completed',
           progress: 100,
           currentStep: 'Assessment completed successfully!',
-          results: finalResults
+          results
         }));
 
         toast({
           title: 'Assessment Completed',
-          description: `Your document scored ${finalResults.credibilityScore}% credibility.`,
+          description: `Your document scored ${data.credibilityScore}% credibility.`,
         });
-      } else if (data.nextBatchNumber !== null) {
+      } else if (data.nextBatchNumber !== null && data.nextBatchNumber !== undefined) {
         // Process next batch after a short delay
         setTimeout(() => {
           processBatch(documentId, userId, data.nextBatchNumber);
         }, 1000);
+      } else {
+        // No more batches but not marked as complete - this shouldn't happen
+        console.warn('Assessment not marked complete but no next batch');
+        throw new Error('Assessment completed but status is unclear');
       }
 
     } catch (error: any) {
@@ -133,69 +160,6 @@ export const useChunkedAssessment = () => {
         description: error.message || 'Failed to process assessment',
         variant: 'destructive',
       });
-    }
-  };
-
-  const getFinalResults = async (documentId: string, userId: string) => {
-    try {
-      // Get the assessment progress to find the report ID
-      const { data: progress, error: progressError } = await supabase
-        .from('assessment_progress')
-        .select('report_id')
-        .eq('document_id', documentId)
-        .eq('user_id', userId)
-        .eq('status', 'completed')
-        .maybeSingle();
-
-      if (progressError) {
-        console.error('Error fetching progress:', progressError);
-        throw new Error('Failed to fetch assessment progress');
-      }
-
-      if (progress?.report_id) {
-        const { data: report, error: reportError } = await supabase
-          .from('assessment_reports')
-          .select('*')
-          .eq('id', progress.report_id)
-          .maybeSingle();
-
-        if (reportError) {
-          console.error('Error fetching report:', reportError);
-          throw new Error('Failed to fetch assessment report');
-        }
-
-        if (report) {
-          // Safely parse the assessment_data JSON
-          const assessmentData = report.assessment_data as AssessmentData;
-          
-          return {
-            credibilityScore: report.credibility_score,
-            totalScore: assessmentData?.totalScore || 0,
-            maxPossibleScore: assessmentData?.maxPossibleScore || 100,
-            reportId: report.id,
-            sectionsProcessed: assessmentData?.sections?.length || 0
-          };
-        }
-      }
-
-      // Fallback if no report found
-      return {
-        credibilityScore: 0,
-        totalScore: 0,
-        maxPossibleScore: 100,
-        reportId: '',
-        sectionsProcessed: 0
-      };
-    } catch (error: any) {
-      console.error('Error getting final results:', error);
-      // Return fallback values instead of throwing
-      return {
-        credibilityScore: 0,
-        totalScore: 0,
-        maxPossibleScore: 100,
-        reportId: '',
-        sectionsProcessed: 0
-      };
     }
   };
 

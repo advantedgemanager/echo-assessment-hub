@@ -43,7 +43,7 @@ serve(async (req) => {
     console.log(`Document status: ${document.assessment_status}, Text length: ${document.document_text?.length || 0}`);
 
     // Check if document needs processing first
-    if (!document.document_text || document.document_text.length < 200) {
+    if (!document.document_text || document.document_text.length < 100) {
       console.log('Document text not available or too short, processing document first...');
       
       try {
@@ -85,45 +85,43 @@ serve(async (req) => {
       }
     }
 
-    // Enhanced text validation - more lenient for processed text
+    // Enhanced text validation - check for excessive binary content
     const documentText = document.document_text;
     if (!documentText || documentText.length < 100) {
       throw new Error('Document text is too short for assessment');
     }
 
-    // Improved binary data detection - be more lenient with processed text
-    const textSample = documentText.substring(0, Math.min(2000, documentText.length));
-    let binaryCharCount = 0;
-    let totalValidChars = 0;
+    // Improved text validation for processed documents
+    const textSample = documentText.substring(0, Math.min(1000, documentText.length));
+    let readableCharCount = 0;
+    let totalChars = textSample.length;
 
     for (let i = 0; i < textSample.length; i++) {
       const charCode = textSample.charCodeAt(i);
       
-      // Count as valid: printable ASCII, common Unicode, whitespace, punctuation
+      // Count readable characters more broadly
       if (
         (charCode >= 32 && charCode <= 126) ||  // Printable ASCII
         (charCode >= 160 && charCode <= 255) ||  // Extended ASCII
         charCode === 9 || charCode === 10 || charCode === 13 || // Tab, LF, CR
-        (charCode >= 256 && charCode <= 0x017F) || // Latin Extended
-        (charCode >= 0x2000 && charCode <= 0x206F) // General Punctuation
+        (charCode >= 0x00C0 && charCode <= 0x017F) || // Latin Extended
+        (charCode >= 0x2010 && charCode <= 0x206F) // General Punctuation
       ) {
-        totalValidChars++;
-      } else if (charCode < 32 && charCode !== 9 && charCode !== 10 && charCode !== 13) {
-        // Count control characters (except tab, LF, CR) as binary
-        binaryCharCount++;
+        readableCharCount++;
       }
     }
 
-    const binaryRatio = totalValidChars > 0 ? (binaryCharCount / (binaryCharCount + totalValidChars)) * 100 : 0;
-    console.log(`Text validation: ${binaryCharCount} binary chars out of ${binaryCharCount + totalValidChars} total (${binaryRatio.toFixed(1)}% binary)`);
+    const readableRatio = totalChars > 0 ? (readableCharCount / totalChars) * 100 : 0;
+    console.log(`Text validation: ${readableCharCount} readable chars out of ${totalChars} total (${readableRatio.toFixed(1)}% readable)`);
 
-    // More lenient threshold for processed documents
-    if (binaryRatio > 60) { // Increased from 30% to 60%
-      console.error(`High binary data ratio detected: ${binaryRatio.toFixed(1)}%`);
-      throw new Error('Document appears to contain mostly binary data - text extraction may have failed');
+    // More lenient threshold - require at least 40% readable characters
+    if (readableRatio < 40) {
+      console.error(`Low readable text ratio detected: ${readableRatio.toFixed(1)}%`);
+      throw new Error('Document appears to contain mostly corrupted or binary data - text extraction may have failed');
     }
 
     // Start the main assessment using the standard assess-document function
+    console.log('Starting main assessment...');
     const { data: assessData, error: assessError } = await supabaseClient.functions.invoke('assess-document', {
       body: { documentId, userId }
     });
@@ -139,18 +137,21 @@ serve(async (req) => {
 
     console.log('Chunked assessment completed successfully');
 
+    // Return comprehensive results that match the expected interface
     return new Response(
       JSON.stringify({
         success: true,
-        batchIndex,
+        batchIndex: 0,
+        isComplete: true,
         credibilityScore: assessData.credibilityScore,
         totalScore: assessData.totalScore,
         maxPossibleScore: assessData.maxPossibleScore,
         reportId: assessData.reportId,
         sectionsProcessed: assessData.sectionsProcessed,
-        processedQuestions: assessData.processedQuestions,
-        totalQuestions: assessData.totalQuestions,
-        overallResult: assessData.overallResult
+        processedQuestions: assessData.processedQuestions || assessData.totalQuestions || 1,
+        totalQuestions: assessData.totalQuestions || 1,
+        overallResult: assessData.overallResult,
+        nextBatchNumber: null // No more batches
       }),
       {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -165,7 +166,8 @@ serve(async (req) => {
       JSON.stringify({ 
         error: error.message,
         success: false,
-        batchIndex: 0
+        batchIndex: 0,
+        isComplete: false
       }),
       {
         status: 500,
