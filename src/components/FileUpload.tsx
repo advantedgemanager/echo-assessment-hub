@@ -23,9 +23,9 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
   const { user } = useAuth();
   const { toast } = useToast();
 
-  // Size limits - Updated to 20MB
-  const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
-  const LARGE_FILE_WARNING = 5 * 1024 * 1024; // 5MB
+  // Size limits
+  const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+  const LARGE_FILE_WARNING = 3 * 1024 * 1024; // 3MB
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = event.target.files?.[0];
