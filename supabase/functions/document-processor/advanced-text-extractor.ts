@@ -1,71 +1,67 @@
 
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 
-// Enhanced PDF text extraction using pdf-parse library
+// Simple but effective PDF text extraction for Deno
 const extractPdfText = async (buffer: ArrayBuffer): Promise<string> => {
   try {
-    console.log('📄 Starting PDF-Parse library extraction...');
+    console.log('📄 Starting Deno-compatible PDF extraction...');
     
-    // Import pdf-parse dynamically for Deno environment
-    const pdfParse = await import('https://esm.sh/pdf-parse@1.1.1');
-    
-    // Convert ArrayBuffer to Buffer for pdf-parse
     const uint8Array = new Uint8Array(buffer);
-    const nodeBuffer = Buffer.from(uint8Array);
-    
-    console.log(`📊 PDF buffer size: ${nodeBuffer.length} bytes`);
-    
-    // Parse PDF using pdf-parse library
-    const data = await pdfParse.default(nodeBuffer);
-    
-    console.log(`📝 PDF pages found: ${data.numpages}`);
-    console.log(`📝 Raw text length: ${data.text.length} characters`);
-    
-    if (data.text && data.text.length > 50) {
-      const cleanText = sanitizeText(data.text);
-      console.log(`✅ PDF extraction successful: ${cleanText.length} characters`);
-      console.log(`Sample: ${cleanText.substring(0, 200)}...`);
-      return cleanText;
-    } else {
-      throw new Error('PDF contains no readable text or is image-based');
-    }
-    
-  } catch (error) {
-    console.error('PDF-Parse error:', error);
-    
-    // Fallback to manual parsing if pdf-parse fails
-    console.log('🔄 Falling back to manual PDF parsing...');
-    return await fallbackPdfExtraction(buffer);
-  }
-};
-
-// Fallback manual PDF extraction
-const fallbackPdfExtraction = async (buffer: ArrayBuffer): Promise<string> => {
-  try {
-    const uint8Array = new Uint8Array(buffer);
-    const decoder = new TextDecoder('utf-8', { fatal: false });
+    const decoder = new TextDecoder('latin1', { fatal: false });
     const pdfContent = decoder.decode(uint8Array);
+    
+    console.log(`📊 PDF buffer size: ${buffer.byteLength} bytes`);
     
     let extractedText = '';
     
-    // Extract text from PDF streams and objects
+    // Extract text from PDF text objects - improved patterns
     const textPatterns = [
-      /\((.*?)\)\s*Tj/gs,
-      /\[(.*?)\]\s*TJ/gs,
-      /BT\s+(.*?)\s+ET/gs
+      // Standard text showing operators
+      /\(((?:[^()\\]|\\[\\()nrtbf]|\\[0-7]{1,3})*)\)\s*Tj/g,
+      /\[((?:[^\[\]\\]|\\[\\()\[\]nrtbf]|\\[0-7]{1,3})*)\]\s*TJ/g,
+      // Text in BT/ET blocks
+      /BT\s+.*?\(((?:[^()\\]|\\[\\()nrtbf]|\\[0-7]{1,3})*)\)\s*Tj.*?ET/gs,
+      // Alternative text patterns
+      /'([^']{3,})'/g,
+      /"([^"]{3,})"/g
     ];
     
     for (const pattern of textPatterns) {
-      const matches = pdfContent.match(pattern) || [];
+      let match;
+      while ((match = pattern.exec(pdfContent)) !== null) {
+        let text = match[1];
+        if (text && text.length > 2) {
+          // Basic unescape for common PDF escape sequences
+          text = text
+            .replace(/\\n/g, ' ')
+            .replace(/\\r/g, ' ')
+            .replace(/\\t/g, ' ')
+            .replace(/\\b/g, ' ')
+            .replace(/\\f/g, ' ')
+            .replace(/\\\\/g, '\\')
+            .replace(/\\'/g, "'")
+            .replace(/\\"/g, '"')
+            .replace(/\\\(/g, '(')
+            .replace(/\\\)/g, ')')
+            .trim();
+          
+          // Filter meaningful text
+          if (text.length > 3 && /[a-zA-Z]/.test(text) && !/^[\d\s\-.,()]+$/.test(text)) {
+            extractedText += text + ' ';
+          }
+        }
+      }
+    }
+    
+    // If still no text, try broader extraction
+    if (extractedText.length < 100) {
+      console.log('🔄 Trying broader PDF text extraction...');
+      const broadTextRegex = /[a-zA-Z][a-zA-Z\s.,;:!?'"()-]{10,}/g;
+      const matches = pdfContent.match(broadTextRegex) || [];
+      
       for (const match of matches) {
-        // Clean extracted text
-        const cleanMatch = match
-          .replace(/\((.*?)\)\s*Tj/g, '$1')
-          .replace(/\[(.*?)\]\s*TJ/g, '$1')
-          .replace(/BT|ET|Tj|TJ/g, '')
-          .trim();
-        
-        if (cleanMatch.length > 3 && /[a-zA-Z]/.test(cleanMatch)) {
+        const cleanMatch = match.trim();
+        if (cleanMatch.length > 10 && !cleanMatch.includes('obj') && !cleanMatch.includes('endobj')) {
           extractedText += cleanMatch + ' ';
         }
       }
@@ -73,54 +69,16 @@ const fallbackPdfExtraction = async (buffer: ArrayBuffer): Promise<string> => {
     
     return sanitizeText(extractedText);
   } catch (error) {
-    console.error('Fallback PDF extraction failed:', error);
-    throw new Error('Unable to extract text from PDF using any method');
+    console.error('PDF extraction error:', error);
+    throw new Error('Unable to extract text from PDF');
   }
 };
 
-// Enhanced DOCX text extraction using mammoth library
+// Simple but effective DOCX text extraction for Deno
 const extractDocxText = async (buffer: ArrayBuffer): Promise<string> => {
   try {
-    console.log('📄 Starting Mammoth library extraction...');
+    console.log('📄 Starting Deno-compatible DOCX extraction...');
     
-    // Import mammoth dynamically for Deno environment
-    const mammoth = await import('https://esm.sh/mammoth@1.9.1');
-    
-    // Convert ArrayBuffer to Buffer for mammoth
-    const uint8Array = new Uint8Array(buffer);
-    const nodeBuffer = Buffer.from(uint8Array);
-    
-    console.log(`📊 DOCX buffer size: ${nodeBuffer.length} bytes`);
-    
-    // Extract text using mammoth
-    const result = await mammoth.extractRawText({ buffer: nodeBuffer });
-    
-    if (result.text && result.text.length > 50) {
-      const cleanText = sanitizeText(result.text);
-      console.log(`✅ DOCX extraction successful: ${cleanText.length} characters`);
-      console.log(`Sample: ${cleanText.substring(0, 200)}...`);
-      
-      if (result.messages && result.messages.length > 0) {
-        console.log('⚠️ Mammoth warnings:', result.messages);
-      }
-      
-      return cleanText;
-    } else {
-      throw new Error('DOCX contains no readable text or is corrupted');
-    }
-    
-  } catch (error) {
-    console.error('Mammoth extraction error:', error);
-    
-    // Fallback to manual ZIP parsing if mammoth fails
-    console.log('🔄 Falling back to manual DOCX parsing...');
-    return await fallbackDocxExtraction(buffer);
-  }
-};
-
-// Fallback manual DOCX extraction
-const fallbackDocxExtraction = async (buffer: ArrayBuffer): Promise<string> => {
-  try {
     const uint8Array = new Uint8Array(buffer);
     
     // Check ZIP signature
@@ -128,26 +86,36 @@ const fallbackDocxExtraction = async (buffer: ArrayBuffer): Promise<string> => {
       throw new Error('Invalid DOCX file - not a ZIP archive');
     }
     
-    // Convert to text for pattern matching
-    const zipContent = Array.from(uint8Array)
-      .map(byte => String.fromCharCode(byte))
-      .join('');
+    console.log(`📊 DOCX buffer size: ${buffer.byteLength} bytes`);
+    
+    // Convert to string for text search
+    const decoder = new TextDecoder('utf-8', { fatal: false });
+    let zipContent = decoder.decode(uint8Array);
     
     let extractedText = '';
     
-    // Look for document.xml content
-    const docXmlStart = zipContent.indexOf('word/document.xml');
-    if (docXmlStart !== -1) {
-      // Find XML content after the file entry
-      let searchPos = docXmlStart + 17;
-      const xmlStart = zipContent.indexOf('<?xml', searchPos);
+    // Look for document.xml content in the ZIP
+    const docXmlPattern = /word\/document\.xml/;
+    const docXmlMatch = zipContent.match(docXmlPattern);
+    
+    if (docXmlMatch) {
+      const docXmlIndex = zipContent.indexOf('word/document.xml');
       
-      if (xmlStart !== -1) {
+      // Find the actual XML content after the ZIP directory entry
+      let searchStart = docXmlIndex + 17; // Skip past "word/document.xml"
+      
+      // Look for XML declaration or document start
+      const xmlStartPattern = /<\?xml[^>]*>|<w:document[^>]*>/;
+      const xmlStartMatch = zipContent.substring(searchStart).match(xmlStartPattern);
+      
+      if (xmlStartMatch) {
+        const xmlStart = searchStart + xmlStartMatch.index!;
         const xmlEnd = zipContent.indexOf('</w:document>', xmlStart);
+        
         if (xmlEnd !== -1) {
           const documentXml = zipContent.substring(xmlStart, xmlEnd + 13);
           
-          // Extract text from w:t elements
+          // Extract text from w:t elements with improved regex
           const textRegex = /<w:t[^>]*>([^<]+)<\/w:t>/g;
           let match;
           
@@ -157,58 +125,82 @@ const fallbackDocxExtraction = async (buffer: ArrayBuffer): Promise<string> => {
               extractedText += text + ' ';
             }
           }
+          
+          // Also try to extract from <w:p> (paragraph) elements
+          if (extractedText.length < 50) {
+            const paragraphRegex = /<w:p[^>]*>(.*?)<\/w:p>/gs;
+            let pMatch;
+            
+            while ((pMatch = paragraphRegex.exec(documentXml)) !== null) {
+              const pContent = pMatch[1];
+              // Remove XML tags and extract text
+              const textOnly = pContent.replace(/<[^>]*>/g, ' ').trim();
+              if (textOnly.length > 3 && /[a-zA-Z]/.test(textOnly)) {
+                extractedText += textOnly + ' ';
+              }
+            }
+          }
         }
       }
     }
     
+    // Fallback: search for readable text in the entire ZIP
     if (extractedText.length < 50) {
-      // Try extracting any readable text from the ZIP
-      const readableTextRegex = /[a-zA-Z][a-zA-Z\s]{20,}/g;
+      console.log('🔄 Trying fallback DOCX text extraction...');
+      
+      // Look for any readable text sequences
+      const readableTextRegex = /[a-zA-Z][a-zA-Z\s.,;:!?'"()-]{15,}/g;
       const matches = zipContent.match(readableTextRegex) || [];
       
       for (const match of matches) {
-        if (!match.includes('xml') && !match.includes('rels') && !match.includes('word')) {
-          extractedText += match + ' ';
+        const cleanMatch = match.trim();
+        // Filter out XML artifacts and file paths
+        if (cleanMatch.length > 15 && 
+            !cleanMatch.includes('xml') && 
+            !cleanMatch.includes('rels') && 
+            !cleanMatch.includes('word/') &&
+            !cleanMatch.includes('docProps')) {
+          extractedText += cleanMatch + ' ';
         }
       }
     }
     
     return sanitizeText(extractedText);
   } catch (error) {
-    console.error('Fallback DOCX extraction failed:', error);
-    throw new Error('Unable to extract text from DOCX using any method');
+    console.error('DOCX extraction error:', error);
+    throw new Error('Unable to extract text from DOCX');
   }
 };
 
-// Comprehensive text sanitization
+// Enhanced text sanitization for database storage
 const sanitizeText = (text: string): string => {
   if (!text) return '';
+  
+  console.log(`🧹 Sanitizing text: ${text.length} characters`);
   
   // Remove problematic characters that cause database issues
   let sanitized = text
     .replace(/\u0000/g, '') // Remove null characters
     .replace(/[\u0001-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '') // Remove control chars
     .replace(/[\uFFF0-\uFFFF]/g, '') // Remove Unicode specials
+    .replace(/[\uFFFE\uFFFF]/g, '') // Remove invalid Unicode
     .replace(/\\[nr]/g, ' ') // Replace escaped newlines
     .replace(/\s+/g, ' ') // Normalize whitespace
     .trim();
   
-  // Ensure valid UTF-8 encoding
-  try {
-    const encoder = new TextEncoder();
-    const decoder = new TextDecoder('utf-8', { fatal: true });
-    const encoded = encoder.encode(sanitized);
-    sanitized = decoder.decode(encoded);
-  } catch (error) {
-    console.warn('Text encoding issue, applying strict sanitization');
-    sanitized = sanitized.replace(/[^\x20-\x7E\u00A0-\u024F\u2010-\u205F]/g, ' ');
-  }
+  // Additional cleanup for common artifacts
+  sanitized = sanitized
+    .replace(/[^\x20-\x7E\u00A0-\u024F\u1E00-\u1EFF\u2010-\u205F]/g, ' ') // Keep only printable chars
+    .replace(/\s+/g, ' ') // Normalize whitespace again
+    .trim();
   
-  return sanitized.trim();
+  console.log(`✨ Sanitized to: ${sanitized.length} characters`);
+  
+  return sanitized;
 };
 
 export const extractTextFromPdfAdvanced = async (arrayBuffer: ArrayBuffer): Promise<string> => {
-  console.log('🔍 Starting advanced PDF text extraction with pdf-parse...');
+  console.log('🔍 Starting Deno-compatible PDF text extraction...');
   
   try {
     const extractedText = await extractPdfText(arrayBuffer);
@@ -226,7 +218,7 @@ export const extractTextFromPdfAdvanced = async (arrayBuffer: ArrayBuffer): Prom
 };
 
 export const extractTextFromDocxAdvanced = async (arrayBuffer: ArrayBuffer): Promise<string> => {
-  console.log('🔍 Starting advanced DOCX text extraction with mammoth...');
+  console.log('🔍 Starting Deno-compatible DOCX text extraction...');
   
   try {
     const extractedText = await extractDocxText(arrayBuffer);
