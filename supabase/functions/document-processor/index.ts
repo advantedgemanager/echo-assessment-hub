@@ -1,7 +1,7 @@
-
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { cleanExtractedText, extractKeyTransitionContent } from './pdf-text-cleaner.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -26,12 +26,15 @@ const extractTextFromPdf = async (arrayBuffer: ArrayBuffer): Promise<string> => 
     const chunkSize = 50000; // Process 50KB at a time
     let extractedText = '';
     
-    // Look for text streams in PDF with improved patterns
+    // Enhanced text patterns for better extraction
     const textPatterns = [
       /BT\s+(.+?)\s+ET/gs, // Text between BT (Begin Text) and ET (End Text)
       /\(([^)]+)\)\s*Tj/gs, // Text in parentheses before Tj
       /\[([^\]]+)\]\s*TJ/gs, // Text arrays before TJ
-      /\/F\d+\s+\d+\s+Tf\s*(.+?)(?=BT|ET|endstream)/gs // Text after font commands
+      /\/F\d+\s+\d+\s+Tf\s*(.+?)(?=BT|ET|endstream)/gs, // Text after font commands
+      // Additional patterns for better extraction
+      />\s*\(([^)]+)\)/gs, // Text after >
+      /\(([^)]+)\)\s*'/gs // Text before quotes
     ];
     
     // Process the PDF in chunks to avoid memory overload
@@ -51,7 +54,7 @@ const extractTextFromPdf = async (arrayBuffer: ArrayBuffer): Promise<string> => 
               .trim();
             
             // Only add meaningful text chunks
-            if (cleanText.length > 20 && /[a-zA-Z]/.test(cleanText)) {
+            if (cleanText.length > 10 && /[a-zA-Z]/.test(cleanText)) {
               extractedText += cleanText + ' ';
             }
           }
@@ -71,8 +74,12 @@ const extractTextFromPdf = async (arrayBuffer: ArrayBuffer): Promise<string> => 
       const limitedData = uint8Array.slice(0, 100000); // Only process first 100KB
       const rawText = decoder.decode(limitedData);
       
+      // More aggressive text extraction for difficult PDFs
       extractedText = rawText
         .replace(/[^\x20-\x7E\n\r\t\s]/g, ' ') // Remove non-printable chars
+        .replace(/\d+\s+\d+\s+obj.*?endobj/gs, ' ') // Remove PDF objects
+        .replace(/<<.*?>>/g, ' ') // Remove PDF dictionaries
+        .replace(/\/\w+/g, ' ') // Remove PDF commands
         .replace(/\s+/g, ' ') // Normalize whitespace
         .split(' ')
         .filter(word => word.length > 2 && /[a-zA-Z]/.test(word)) // Keep words with letters
@@ -80,19 +87,21 @@ const extractTextFromPdf = async (arrayBuffer: ArrayBuffer): Promise<string> => 
         .trim();
     }
     
-    console.log(`PDF text extraction result: ${extractedText.length} characters`);
+    console.log(`PDF text extraction result before cleaning: ${extractedText.length} characters`);
     
-    if (extractedText.length < 100) {
+    // Apply advanced text cleaning
+    const cleanedText = cleanExtractedText(extractedText);
+    
+    // Extract transition-specific content
+    const finalText = extractKeyTransitionContent(cleanedText);
+    
+    console.log(`PDF text extraction result after cleaning: ${finalText.length} characters`);
+    
+    if (finalText.length < 100) {
       throw new Error('Unable to extract sufficient readable text from PDF. The PDF may be image-based, encrypted, or corrupted.');
     }
     
-    // Clean up the extracted text for better AI processing
-    extractedText = extractedText
-      .replace(/\s+/g, ' ') // Normalize all whitespace
-      .replace(/(.)\1{4,}/g, '$1$1$1') // Remove excessive character repetition
-      .trim();
-    
-    return extractedText;
+    return finalText;
     
   } catch (error) {
     console.error('PDF text extraction error:', error);
@@ -290,7 +299,8 @@ serve(async (req) => {
       } else if (document.file_type.startsWith('text/') || document.file_name.toLowerCase().endsWith('.txt')) {
         // Handle plain text files
         const decoder = new TextDecoder('utf-8');
-        extractedText = decoder.decode(arrayBuffer);
+        const rawText = decoder.decode(arrayBuffer);
+        extractedText = cleanExtractedText(rawText);
       } else {
         throw new Error(`Unsupported file type: ${document.file_type}. Supported types: PDF, DOCX, TXT`);
       }
