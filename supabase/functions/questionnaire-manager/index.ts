@@ -1,3 +1,4 @@
+
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -5,17 +6,6 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
-
-// Load the complete questionnaire JSON file
-const loadDefaultQuestionnaire = async () => {
-  try {
-    const questionnaireText = await Deno.readTextFile('./complete_transition_questionnaire.json');
-    return JSON.parse(questionnaireText);
-  } catch (error) {
-    console.warn('Could not load default questionnaire file:', error);
-    return null;
-  }
 };
 
 serve(async (req) => {
@@ -32,7 +22,7 @@ serve(async (req) => {
     });
     
     const { action, questionnaire_data, version, description } = requestBody;
-    console.log(`🚀 Questionnaire manager v6.0 - Action: ${action}`);
+    console.log(`🚀 Questionnaire manager v5.0 - Action: ${action}`);
 
     // Initialize Supabase client
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
@@ -40,7 +30,7 @@ serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     if (action === 'upload') {
-      console.log('=== Questionnaire Upload v6.0 ===');
+      console.log('=== Questionnaire Upload v5.0 ===');
       
       try {
         if (!questionnaire_data) {
@@ -51,7 +41,7 @@ serve(async (req) => {
         console.log('Available top-level keys:', Object.keys(questionnaire_data));
 
         let transformedQuestionnaire;
-        let finalVersion = version || '6.0';
+        let finalVersion = version || '5.0';
         let totalQuestions = 0;
 
         // Handle nested transition_plan_questionnaire structure
@@ -247,7 +237,7 @@ serve(async (req) => {
     }
 
     if (action === 'retrieve') {
-      console.log('=== Questionnaire Retrieval v6.0 ===');
+      console.log('=== Questionnaire Retrieval v5.0 ===');
       
       try {
         const { data: activeQuestionnaire, error: dbError } = await supabase
@@ -283,84 +273,11 @@ serve(async (req) => {
           });
         }
 
-        console.log('⚠️ No active questionnaire found, trying to load default file...');
-        
-        // Try to load and auto-upload the default questionnaire
-        const defaultQuestionnaire = await loadDefaultQuestionnaire();
-        
-        if (defaultQuestionnaire) {
-          console.log('📁 Found default questionnaire file, auto-uploading...');
-          
-          // Transform and upload the default questionnaire
-          let transformedQuestionnaire;
-          let totalQuestions = 0;
-          
-          if (defaultQuestionnaire.sections && Array.isArray(defaultQuestionnaire.sections)) {
-            transformedQuestionnaire = {
-              version: "1.0",
-              title: defaultQuestionnaire.title || 'Transition Plan Credibility Assessment',
-              description: defaultQuestionnaire.description || 'Comprehensive credibility assessment questionnaire',
-              sections: defaultQuestionnaire.sections
-            };
-            totalQuestions = transformedQuestionnaire.sections.reduce((total, section) => {
-              return total + (section.questions ? section.questions.length : 0);
-            }, 0);
-          }
-          
-          if (transformedQuestionnaire && totalQuestions > 0) {
-            const enhancedQuestionnaire = {
-              version: "1.0",
-              title: transformedQuestionnaire.title,
-              description: transformedQuestionnaire.description,
-              totalQuestions: totalQuestions,
-              sections: transformedQuestionnaire.sections,
-              uploadedAt: new Date().toISOString(),
-              enhanced: true,
-              autoLoaded: true
-            };
-
-            // Insert the auto-loaded questionnaire
-            const { data: insertData, error: insertError } = await supabase
-              .from('questionnaire_metadata')
-              .insert({
-                file_name: 'complete_transition_questionnaire.json',
-                file_path: '/questionnaires/auto-loaded',
-                version: "1.0",
-                description: enhancedQuestionnaire.description,
-                questionnaire_data: enhancedQuestionnaire,
-                is_active: true
-              })
-              .select()
-              .single();
-
-            if (!insertError) {
-              console.log('🎉 Auto-loaded questionnaire successfully!');
-              console.log(`   - Questions: ${totalQuestions}`);
-              console.log(`   - Sections: ${transformedQuestionnaire.sections.length}`);
-              
-              return new Response(JSON.stringify({
-                questionnaire: enhancedQuestionnaire,
-                metadata: {
-                  version: '1.0',
-                  uploaded_at: insertData.uploaded_at,
-                  description: enhancedQuestionnaire.description,
-                  totalQuestions: totalQuestions,
-                  enhanced: true,
-                  is_active: true,
-                  autoLoaded: true
-                }
-              }), {
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-              });
-            }
-          }
-        }
-        
-        console.log('⚠️ Falling back to basic questionnaire...');
+        console.log('⚠️ No active questionnaire found, returning fallback...');
         
         // Fallback questionnaire
         const fallbackQuestionnaire = {
-          version: "6.0",
+          version: "5.0",
           title: "Fallback Transition Plan Assessment",
           description: "Basic fallback questionnaire",
           totalQuestions: 4,
@@ -407,7 +324,7 @@ serve(async (req) => {
         return new Response(JSON.stringify({
           questionnaire: fallbackQuestionnaire,
           metadata: {
-            version: '6.0',
+            version: '5.0',
             uploaded_at: new Date().toISOString(),
             description: 'Fallback questionnaire',
             totalQuestions: 4,
@@ -436,7 +353,7 @@ serve(async (req) => {
     );
 
   } catch (error) {
-    console.error('❌ Error in questionnaire-manager v6.0:', error);
+    console.error('❌ Error in questionnaire-manager v5.0:', error);
     return new Response(
       JSON.stringify({ 
         error: error.message,
