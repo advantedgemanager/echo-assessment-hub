@@ -1,4 +1,3 @@
-
 export interface QuestionEvaluation {
   questionId: string;
   questionText: string;
@@ -251,7 +250,7 @@ Think carefully - only answer "Yes" if the evidence is clear and specific.`;
               { role: 'user', content: userPrompt }
             ],
             max_tokens: 20,
-            temperature: 0.0 // Completely deterministic
+            temperature: 0.3 // Increased from 0.0 to 0.3 for slightly more variability
           }),
           signal: controller.signal
         });
