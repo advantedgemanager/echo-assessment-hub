@@ -1,4 +1,3 @@
-
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 
 // Enhanced PDF text extraction using multiple strategies
@@ -61,11 +60,8 @@ const extractPdfText = async (buffer: ArrayBuffer): Promise<string> => {
       }
     }
     
-    // Clean up the extracted text
-    extractedText = extractedText
-      .replace(/\\[nr]/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
+    // Clean and sanitize the extracted text
+    extractedText = sanitizeText(extractedText);
     
     console.log(`PDF extraction result: ${extractedText.length} characters`);
     console.log(`Sample: ${extractedText.substring(0, 200)}...`);
@@ -77,92 +73,110 @@ const extractPdfText = async (buffer: ArrayBuffer): Promise<string> => {
   }
 };
 
-// Enhanced DOCX text extraction by parsing the XML structure
+// Enhanced DOCX text extraction using ZIP and XML parsing
 const extractDocxText = async (buffer: ArrayBuffer): Promise<string> => {
   try {
-    // DOCX files are ZIP archives containing XML files
-    // We need to extract and parse the document.xml file
+    console.log('🔍 Starting enhanced DOCX text extraction...');
     
+    // DOCX files are ZIP archives - we need to find and extract document.xml
     const uint8Array = new Uint8Array(buffer);
     
-    // Look for the document.xml content within the ZIP structure
-    // Find the start of document.xml content
-    let documentXmlStart = -1;
-    let documentXmlEnd = -1;
+    // Simple ZIP file signature check
+    if (uint8Array[0] !== 0x50 || uint8Array[1] !== 0x4B) {
+      throw new Error('Invalid DOCX file format - not a ZIP archive');
+    }
     
-    // Convert to string to search for XML patterns
-    const decoder = new TextDecoder('utf-8', { fatal: false });
-    const content = decoder.decode(uint8Array);
+    // Convert to string for pattern matching (use latin1 to preserve bytes)
+    const zipContent = Array.from(uint8Array)
+      .map(byte => String.fromCharCode(byte))
+      .join('');
     
-    // Look for word processing document content
-    const xmlPatterns = [
-      /<w:document[^>]*>.*?<\/w:document>/gs,
-      /<w:body[^>]*>.*?<\/w:body>/gs,
-      /<w:p[^>]*>.*?<\/w:p>/gs
+    console.log('ZIP content length:', zipContent.length);
+    
+    // Look for document.xml within the ZIP structure
+    let documentXml = '';
+    
+    // Strategy 1: Find document.xml file content
+    const docXmlMarkers = [
+      'word/document.xml',
+      'document.xml'
     ];
     
-    let extractedText = '';
-    
-    // Strategy 1: Extract from word processing XML tags
-    for (const pattern of xmlPatterns) {
-      const matches = content.match(pattern) || [];
-      for (const match of matches) {
-        // Extract text from w:t tags (Word text elements)
-        const textMatches = match.match(/<w:t[^>]*>([^<]+)<\/w:t>/g) || [];
-        for (const textMatch of textMatches) {
-          const text = textMatch.replace(/<[^>]*>/g, '').trim();
-          if (text.length > 1 && /[a-zA-Z]/.test(text)) {
-            extractedText += text + ' ';
+    for (const marker of docXmlMarkers) {
+      const markerIndex = zipContent.indexOf(marker);
+      if (markerIndex !== -1) {
+        console.log(`Found ${marker} at index:`, markerIndex);
+        
+        // Look for XML content after the marker
+        const searchStart = markerIndex + marker.length;
+        const xmlStart = zipContent.indexOf('<?xml', searchStart);
+        
+        if (xmlStart !== -1) {
+          // Find the end of the XML document
+          const xmlEnd = zipContent.indexOf('</w:document>', xmlStart);
+          if (xmlEnd !== -1) {
+            documentXml = zipContent.substring(xmlStart, xmlEnd + 13);
+            console.log('Extracted document.xml, length:', documentXml.length);
+            break;
           }
         }
       }
     }
     
-    // Strategy 2: Look for any readable text between angle brackets
-    if (extractedText.length < 100) {
-      const readableTextPattern = />([^<>{}\[\]]{15,})</g;
-      const readableMatches = content.match(readableTextPattern) || [];
-      
-      for (const match of readableMatches) {
-        const text = match.replace(/[><]/g, '').trim();
-        if (text.length > 10 && 
-            /[a-zA-Z]{3,}/.test(text) &&
-            !text.includes('xml') &&
-            !text.includes('word') &&
-            !text.includes('rels') &&
-            !text.includes('Content_Types') &&
-            !/^[\d\s\-.,()]+$/.test(text)) {
-          extractedText += text + ' ';
-        }
+    // Strategy 2: Look for any w:t (text) elements in the entire content
+    if (!documentXml) {
+      console.log('Fallback: searching for w:t elements in entire content');
+      documentXml = zipContent;
+    }
+    
+    let extractedText = '';
+    
+    // Extract text from w:t elements (Word text nodes)
+    const textElementRegex = /<w:t[^>]*>([^<]+)<\/w:t>/g;
+    let match;
+    
+    while ((match = textElementRegex.exec(documentXml)) !== null) {
+      const text = match[1];
+      if (text && text.trim().length > 0) {
+        // Decode XML entities
+        const decodedText = text
+          .replace(/&lt;/g, '<')
+          .replace(/&gt;/g, '>')
+          .replace(/&amp;/g, '&')
+          .replace(/&quot;/g, '"')
+          .replace(/&apos;/g, "'");
+        
+        extractedText += decodedText + ' ';
       }
     }
     
-    // Strategy 3: Extract from plain text between XML elements
+    // Strategy 3: Look for readable text between XML tags
     if (extractedText.length < 100) {
-      // Remove all XML tags and extract readable content
-      const textOnly = content
+      console.log('Fallback: extracting text between XML tags');
+      
+      // Remove XML tags and extract readable content
+      const cleanContent = documentXml
         .replace(/<[^>]*>/g, ' ')
-        .replace(/[{}[\]()]/g, ' ')
-        .split(/\s+/)
-        .filter(word => 
-          word.length > 3 && 
-          /[a-zA-Z]/.test(word) &&
-          !word.includes('xml') &&
-          !word.includes('docx') &&
-          !word.includes('word')
-        )
-        .join(' ');
+        .replace(/&[a-zA-Z0-9#]+;/g, ' ');
       
-      if (textOnly.length > extractedText.length) {
-        extractedText = textOnly;
+      // Split into words and filter
+      const words = cleanContent.split(/\s+/)
+        .filter(word => 
+          word.length > 2 && 
+          /^[a-zA-Z0-9\s\-.,!?()]+$/.test(word) &&
+          !word.includes('xml') &&
+          !word.includes('word') &&
+          !word.includes('rels') &&
+          !word.includes('Content_Types')
+        );
+      
+      if (words.length > 10) {
+        extractedText = words.join(' ');
       }
     }
     
-    // Clean up the extracted text
-    extractedText = extractedText
-      .replace(/\s+/g, ' ')
-      .replace(/\n\s*\n/g, '\n')
-      .trim();
+    // Clean and sanitize the final text
+    extractedText = sanitizeText(extractedText);
     
     console.log(`DOCX extraction result: ${extractedText.length} characters`);
     console.log(`Sample: ${extractedText.substring(0, 200)}...`);
@@ -172,6 +186,35 @@ const extractDocxText = async (buffer: ArrayBuffer): Promise<string> => {
     console.error('DOCX extraction error:', error);
     throw new Error(`DOCX extraction failed: ${error.message}`);
   }
+};
+
+// Comprehensive text sanitization function
+const sanitizeText = (text: string): string => {
+  if (!text) return '';
+  
+  // Remove null characters and other control characters that cause DB issues
+  let sanitized = text
+    .replace(/\u0000/g, '') // Remove null characters
+    .replace(/[\u0001-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '') // Remove other control chars
+    .replace(/[\uFFF0-\uFFFF]/g, '') // Remove Unicode specials
+    .replace(/\\[nr]/g, ' ') // Replace escaped newlines
+    .replace(/\s+/g, ' ') // Normalize whitespace
+    .trim();
+  
+  // Ensure the text is valid UTF-8
+  try {
+    // Test if string can be encoded/decoded properly
+    const encoder = new TextEncoder();
+    const decoder = new TextDecoder('utf-8', { fatal: true });
+    const encoded = encoder.encode(sanitized);
+    sanitized = decoder.decode(encoded);
+  } catch (error) {
+    console.warn('Text encoding issue, applying aggressive sanitization');
+    // Fallback: keep only basic ASCII and common Unicode
+    sanitized = sanitized.replace(/[^\x20-\x7E\u00A0-\u024F\u2010-\u205F]/g, ' ');
+  }
+  
+  return sanitized.trim();
 };
 
 export const extractTextFromPdfAdvanced = async (arrayBuffer: ArrayBuffer): Promise<string> => {
