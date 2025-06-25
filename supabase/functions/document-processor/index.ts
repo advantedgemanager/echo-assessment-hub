@@ -8,10 +8,10 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Maximum document size (1.5MB in characters for stability)
-const MAX_DOCUMENT_SIZE = 1.5 * 1024 * 1024;
-// Maximum chunk size for processing (reduced for memory efficiency)
-const MAX_CHUNK_SIZE = 300 * 1024; // 300KB chunks
+// Maximum document size (2MB in characters for stability - increased from 1.5MB)
+const MAX_DOCUMENT_SIZE = 2 * 1024 * 1024;
+// Maximum chunk size for processing (increased for larger files)
+const MAX_CHUNK_SIZE = 500 * 1024; // 500KB chunks
 
 const extractTextFromPdf = async (arrayBuffer: ArrayBuffer): Promise<string> => {
   console.log('🚀 Using enhanced PDF text extraction...');
@@ -123,7 +123,7 @@ serve(async (req) => {
   const startTime = Date.now();
   
   try {
-    console.log('=== Starting enhanced document processing v2.0 ===');
+    console.log('=== Starting enhanced document processing v2.1 (20MB support) ===');
     
     const supabaseClient = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
@@ -151,9 +151,9 @@ serve(async (req) => {
 
     console.log(`Document details: ${document.file_name}, Size: ${document.file_size} bytes, Type: ${document.file_type}`);
 
-    // Check file size before processing
-    if (document.file_size > 5 * 1024 * 1024) { // 5MB limit
-      throw new Error('Document too large. Please use a smaller file (max 5MB).');
+    // Check file size before processing - Updated to 20MB limit
+    if (document.file_size > 20 * 1024 * 1024) { // 20MB limit
+      throw new Error('Document too large. Please use a smaller file (max 20MB).');
     }
 
     // Download file from storage with timeout
@@ -286,6 +286,7 @@ serve(async (req) => {
         processingTime,
         qualityRatio: Math.round(qualityRatio * 100),
         enhancedProcessing: true,
+        maxFileSize: '20MB',
         message: wasTruncated 
           ? 'Document processed with enhanced extraction but was truncated due to size limits'
           : 'Document processed successfully with enhanced PDF extraction'
@@ -297,7 +298,7 @@ serve(async (req) => {
 
   } catch (error: any) {
     const processingTime = Date.now() - startTime;
-    console.error('❌ Error in enhanced document-processor v2.0:', error);
+    console.error('❌ Error in enhanced document-processor v2.1:', error);
     console.error('Error stack:', error.stack);
     
     return new Response(
@@ -306,6 +307,7 @@ serve(async (req) => {
         success: false,
         processingTime,
         enhanced: true,
+        maxFileSize: '20MB',
         details: error.stack
       }),
       {

@@ -1,17 +1,17 @@
 
 // Enhanced PDF parsing utility using multiple extraction strategies
 export class PDFTextExtractor {
-  private static readonly MAX_CHUNK_SIZE = 300 * 1024; // 300KB
+  private static readonly MAX_CHUNK_SIZE = 500 * 1024; // Increased to 500KB
   
   /**
    * Primary PDF text extraction using advanced patterns and algorithms
    */
   static async extractText(arrayBuffer: ArrayBuffer): Promise<string> {
-    console.log('🔍 Starting enhanced PDF text extraction...');
+    console.log('🔍 Starting enhanced PDF text extraction v2.0...');
     
     try {
       const uint8Array = new Uint8Array(arrayBuffer);
-      console.log(`📄 Processing PDF: ${uint8Array.length} bytes`);
+      console.log(`📄 Processing PDF: ${uint8Array.length} bytes (up to 20MB supported)`);
       
       // Strategy 1: Advanced text stream extraction
       let extractedText = await this.extractWithAdvancedPatterns(uint8Array);
@@ -46,7 +46,7 @@ export class PDFTextExtractor {
   }
   
   /**
-   * Advanced pattern-based text extraction with improved algorithms
+   * Advanced pattern-based text extraction with improved algorithms for larger files
    */
   private static async extractWithAdvancedPatterns(uint8Array: Uint8Array): Promise<string> {
     const decoder = new TextDecoder('utf-8', { fatal: false });
@@ -80,7 +80,7 @@ export class PDFTextExtractor {
       /q\s+(.+?)\s+Q/gs
     ];
     
-    const chunkSize = 100000; // Process in 100KB chunks
+    const chunkSize = 150000; // Increased chunk size for larger files (150KB chunks)
     
     for (let i = 0; i < uint8Array.length && extractedText.length < this.MAX_CHUNK_SIZE; i += chunkSize) {
       const chunk = uint8Array.slice(i, i + chunkSize);
