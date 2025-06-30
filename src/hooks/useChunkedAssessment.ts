@@ -81,6 +81,8 @@ export const useChunkedAssessment = () => {
   };
 
   const startChunkedAssessment = async (documentId: string, userId: string) => {
+    let timeoutId: NodeJS.Timeout;
+    
     try {
       // Get the actual number of questions from the active questionnaire
       const totalQuestions = await getQuestionnaireInfo();
@@ -97,24 +99,51 @@ export const useChunkedAssessment = () => {
         results: null
       });
 
-      // Call the correct Edge Function
       console.log(`Processing assessment for document ${documentId} with ${totalQuestions} questions`);
       
       setAssessmentState(prev => ({
         ...prev,
         currentStep: 'Running AI assessment...',
         progress: 30,
-        processedQuestions: Math.floor(totalQuestions * 0.2), // Show 20% progress initially
+        processedQuestions: Math.floor(totalQuestions * 0.2),
         totalQuestions: totalQuestions
       }));
 
+      // Set up a timeout warning after 3 minutes
+      timeoutId = setTimeout(() => {
+        setAssessmentState(prev => ({
+          ...prev,
+          currentStep: 'Assessment is taking longer than expected... Please wait',
+          progress: 60
+        }));
+      }, 3 * 60 * 1000); // 3 minutes
+
+      // Set up an AbortController for the request with extended timeout
+      const controller = new AbortController();
+      const requestTimeoutId = setTimeout(() => {
+        controller.abort();
+      }, 8 * 60 * 1000); // 8 minutes timeout
+
       const { data, error } = await supabase.functions.invoke('assess-document', {
-        body: { documentId, userId }
+        body: { documentId, userId },
+        signal: controller.signal
       });
+
+      // Clear timeouts on success
+      clearTimeout(timeoutId);
+      clearTimeout(requestTimeoutId);
 
       if (error) {
         console.error('Invoke error:', error);
-        throw new Error(error.message || 'Failed to invoke assessment function');
+        
+        // Handle specific error types
+        if (error.message?.includes('AbortError') || error.message?.includes('timeout')) {
+          throw new Error('Assessment timed out. This can happen with large documents. Please try again or contact support if the issue persists.');
+        } else if (error.message?.includes('Failed to fetch')) {
+          throw new Error('Network connection lost during assessment. Please check your internet connection and try again.');
+        } else {
+          throw new Error(error.message || 'Failed to invoke assessment function');
+        }
       }
 
       if (!data?.success) {
@@ -149,16 +178,31 @@ export const useChunkedAssessment = () => {
       });
 
     } catch (error: any) {
+      // Clear timeouts on error
+      if (timeoutId) clearTimeout(timeoutId);
+      
       console.error('Assessment error:', error);
+      
+      let errorMessage = error.message || 'Failed to process assessment';
+      
+      // Provide more specific error messages
+      if (error.name === 'AbortError') {
+        errorMessage = 'Assessment timed out after 8 minutes. This can happen with very large documents or high server load. Please try again later.';
+      } else if (errorMessage.includes('Failed to fetch')) {
+        errorMessage = 'Network connection error. Please check your internet connection and try again.';
+      } else if (errorMessage.includes('timeout')) {
+        errorMessage = 'Assessment timed out. The document may be too large or the server is experiencing high load. Please try again later.';
+      }
+      
       setAssessmentState(prev => ({
         ...prev,
         status: 'error',
-        error: error.message || 'Failed to process assessment'
+        error: errorMessage
       }));
 
       toast({
         title: 'Assessment Failed',
-        description: error.message || 'Failed to process assessment',
+        description: errorMessage,
         variant: 'destructive',
       });
     }
