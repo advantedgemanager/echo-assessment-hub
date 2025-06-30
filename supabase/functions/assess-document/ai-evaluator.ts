@@ -1,3 +1,4 @@
+
 export interface QuestionEvaluation {
   questionId: string;
   questionText: string;
@@ -6,7 +7,7 @@ export interface QuestionEvaluation {
   weight: number;
 }
 
-const API_TIMEOUT = 150000; // Increased to 2.5 minutes
+const API_TIMEOUT = 300000; // Increased to 5 minutes (300 seconds)
 const MAX_RETRIES = 3; // Increased retries
 const RATE_LIMIT_DELAY = 2000; // Reduced delay for better throughput
 const MAX_CONCURRENT_REQUESTS = 1; // Sequential processing
@@ -244,13 +245,13 @@ Think carefully - only answer "Yes" if the evidence is clear and specific.`;
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            model: 'mistral-large-latest',
+            model: 'mistral-small-2312', // Updated to Mistral Small 3.1
             messages: [
               { role: 'system', content: systemPrompt },
               { role: 'user', content: userPrompt }
             ],
             max_tokens: 20,
-            temperature: 0.3 // Increased from 0.0 to 0.3 for slightly more variability
+            temperature: 0.0 // Reduced temperature to 0.0 for maximum consistency
           }),
           signal: controller.signal
         });
