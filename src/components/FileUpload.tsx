@@ -22,6 +22,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
   const [error, setError] = useState('');
   const [sizeWarning, setSizeWarning] = useState('');
   const [pdfPreview, setPdfPreview] = useState<string>('');
+  const [extractedText, setExtractedText] = useState<string>('');
   const { user } = useAuth();
   const { toast } = useToast();
 
@@ -39,6 +40,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
         setFile(null);
         setSizeWarning('');
         setPdfPreview('');
+        setExtractedText('');
         return;
       }
 
@@ -47,6 +49,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
         setFile(null);
         setSizeWarning('');
         setPdfPreview('');
+        setExtractedText('');
         return;
       }
 
@@ -61,12 +64,13 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
         setSizeWarning('');
       }
 
-      // Preview PDF content if it's a PDF
+      // Extract text from PDF and store it
       if (selectedFile.type === 'application/pdf') {
         try {
           const result = await extractTextFromPdfAdvanced(selectedFile);
           const preview = result.text.substring(0, 500) + (result.text.length > 500 ? '...' : '');
           setPdfPreview(preview);
+          setExtractedText(result.text); // Store full extracted text
           
           if (!isPdfReadable(result.text)) {
             setSizeWarning(prev => prev + ' The PDF appears to contain mostly images or unreadable text.');
@@ -74,9 +78,11 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
         } catch (err) {
           console.warn('PDF preview failed:', err);
           setPdfPreview('Unable to preview PDF content');
+          setExtractedText(''); // Clear extracted text on error
         }
       } else {
         setPdfPreview('');
+        setExtractedText(''); // For DOCX files, we'll handle text extraction in backend
       }
     }
   };
@@ -99,7 +105,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
 
       if (uploadError) throw uploadError;
 
-      // Record the document in the database
+      // Record the document in the database with extracted text (if available)
       const { data: documentData, error: dbError } = await supabase
         .from('uploaded_documents')
         .insert({
@@ -108,8 +114,9 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
           file_path: filePath,
           file_size: file.size,
           file_type: file.type,
+          document_text: extractedText || null, // Store extracted text directly
           is_temporary: true,
-          assessment_status: 'pending'
+          assessment_status: extractedText ? 'processed' : 'pending' // Set status based on whether we have text
         })
         .select()
         .single();
@@ -171,6 +178,11 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
             <div className="p-3 bg-muted rounded-md text-sm font-mono max-h-32 overflow-y-auto">
               {pdfPreview}
             </div>
+            {extractedText && (
+              <div className="text-xs text-green-600">
+                ✓ Text extracted successfully ({extractedText.length} characters)
+              </div>
+            )}
           </div>
         )}
 
@@ -208,6 +220,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
           <p>• Maximum file size: {MAX_FILE_SIZE / (1024 * 1024)}MB</p>
           <p>• Supported formats: PDF, DOCX</p>
           <p>• Enhanced PDF text extraction with preview</p>
+          <p>• Text is extracted during upload for better accuracy</p>
         </div>
       </CardContent>
     </Card>

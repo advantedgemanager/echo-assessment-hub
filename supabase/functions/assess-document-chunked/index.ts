@@ -14,7 +14,7 @@ serve(async (req) => {
   }
 
   try {
-    console.log('=== Starting optimized chunked assessment ===');
+    console.log('=== Starting optimized chunked assessment v2.0 ===');
     
     const supabaseClient = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
@@ -83,9 +83,11 @@ serve(async (req) => {
         console.error('Document processing error:', error);
         throw new Error(`Failed to process document: ${error.message}`);
       }
+    } else {
+      console.log('Using pre-extracted text (likely from frontend)');
     }
 
-    // Enhanced text validation - check for excessive binary content
+    // Enhanced text validation - check for readable content
     const documentText = document.document_text;
     if (!documentText || documentText.length < 100) {
       throw new Error('Document text is too short for assessment');
@@ -121,7 +123,7 @@ serve(async (req) => {
     }
 
     // Start the main assessment using the standard assess-document function
-    console.log('Starting main assessment...');
+    console.log('Starting main assessment with pre-extracted or processed text...');
     const { data: assessData, error: assessError } = await supabaseClient.functions.invoke('assess-document', {
       body: { documentId, userId }
     });
@@ -151,6 +153,7 @@ serve(async (req) => {
         processedQuestions: assessData.processedQuestions || assessData.totalQuestions || 1,
         totalQuestions: assessData.totalQuestions || 1,
         overallResult: assessData.overallResult,
+        textSource: assessData.textSource || 'processed',
         nextBatchNumber: null // No more batches
       }),
       {

@@ -1,3 +1,4 @@
+
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -30,7 +31,7 @@ serve(async (req) => {
   const startTime = Date.now();
   
   try {
-    console.log('=== Starting enhanced 265-question assessment v4.0 ===');
+    console.log('=== Starting enhanced 265-question assessment v5.0 ===');
     
     const supabaseClient = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
@@ -62,8 +63,34 @@ serve(async (req) => {
     const document = await getDocument(supabaseClient, documentId, userId);
     console.log(`Document fetched: ${document.file_name}, text length: ${document.document_text?.length || 0}`);
 
-    if (!document.document_text) {
-      throw new Error('Document text not available. Please process the document first.');
+    // Check if document already has extracted text (from frontend)
+    if (!document.document_text || document.document_text.length < 50) {
+      // If no text available, try to process the document
+      console.log('No pre-extracted text found, attempting document processing...');
+      
+      // Try to process the document to extract text
+      try {
+        const { data: processData, error: processError } = await supabaseClient.functions.invoke('document-processor', {
+          body: { documentId }
+        });
+
+        if (processError || !processData?.success) {
+          throw new Error('Document processing failed - text extraction required for assessment');
+        }
+
+        // Refetch document after processing
+        const updatedDocument = await getDocument(supabaseClient, documentId, userId);
+        Object.assign(document, updatedDocument);
+        console.log(`Document processed, final text length: ${document.document_text?.length || 0}`);
+      } catch (error) {
+        throw new Error('Document text not available and processing failed. Please ensure the document is properly formatted and try uploading again.');
+      }
+    } else {
+      console.log('Using pre-extracted text from frontend upload');
+    }
+
+    if (!document.document_text || document.document_text.length < 50) {
+      throw new Error('Document text is too short for assessment. Please upload a document with more readable text content.');
     }
 
     // Enhanced document handling with smarter truncation strategy
@@ -144,7 +171,7 @@ serve(async (req) => {
     checkTimeout();
 
     // Enhanced comprehensive assessment processing
-    console.log(`Starting enhanced AI assessment v4.0 for ${totalQuestions} questions...`);
+    console.log(`Starting enhanced AI assessment v5.0 for ${totalQuestions} questions...`);
     const assessmentResults = await processAssessment(
       questionnaireData,
       chunksToProcess,
@@ -172,7 +199,7 @@ serve(async (req) => {
       document,
       assessmentResults,
       assessmentResults.credibilityScore,
-      questionnaireData.metadata?.version || '4.0'
+      questionnaireData.metadata?.version || '5.0'
     );
     console.log(`Enhanced assessment report saved with ID: ${reportData.id}`);
 
@@ -182,7 +209,7 @@ serve(async (req) => {
     console.log('Document status updated');
 
     const processingTime = Date.now() - startTime;
-    console.log(`=== Enhanced 265-question assessment v4.0 completed successfully in ${processingTime}ms ===`);
+    console.log(`=== Enhanced 265-question assessment v5.0 completed successfully in ${processingTime}ms ===`);
 
     // Enhanced response with comprehensive metadata
     return new Response(
@@ -202,7 +229,8 @@ serve(async (req) => {
         overallResult: assessmentResults.overallResult,
         redFlagTriggered: assessmentResults.redFlagTriggered,
         reasoning: assessmentResults.reasoning,
-        version: '4.0'
+        version: '5.0',
+        textSource: 'frontend_extracted' // Indicate text was extracted by frontend
       }),
       {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -211,7 +239,7 @@ serve(async (req) => {
 
   } catch (error: any) {
     const processingTime = Date.now() - startTime;
-    console.error('Error in enhanced assess-document v4.0:', error);
+    console.error('Error in enhanced assess-document v5.0:', error);
     console.error('Error stack:', error.stack);
     console.error(`Failed after ${processingTime}ms`);
     
@@ -231,8 +259,8 @@ serve(async (req) => {
     } else if (error.message.includes('MISTRAL_API_KEY')) {
       errorMessage = 'AI service configuration error. Please contact support.';
       errorCode = 'CONFIG_ERROR';
-    } else if (error.message.includes('document_text')) {
-      errorMessage = 'Document text could not be extracted. Please ensure the document is properly formatted and try uploading again.';
+    } else if (error.message.includes('document_text') || error.message.includes('text extraction')) {
+      errorMessage = 'Document text could not be extracted or is too short. Please ensure the document contains readable text and try uploading again.';
       errorCode = 'DOCUMENT_ERROR';
     } else if (error.message.includes('fetch') || error.message.includes('network')) {
       errorMessage = 'Network error while connecting to AI service during enhanced assessment. Please check your connection and try again.';
@@ -246,7 +274,7 @@ serve(async (req) => {
         processingTime,
         success: false,
         details: error.message,
-        version: '4.0'
+        version: '5.0'
       }),
       {
         status: 500,
