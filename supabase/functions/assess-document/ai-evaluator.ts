@@ -7,9 +7,9 @@ export interface QuestionEvaluation {
   weight: number;
 }
 
-const API_TIMEOUT = 300000; // Increased to 5 minutes (300 seconds)
-const MAX_RETRIES = 3; // Increased retries
-const RATE_LIMIT_DELAY = 2000; // Reduced delay for better throughput
+const API_TIMEOUT = 180000; // Ridotto a 3 minuti per evitare blocchi
+const MAX_RETRIES = 2; // Ridotto per velocizzare
+const RATE_LIMIT_DELAY = 3000; // Aumentato delay per rate limiting
 const MAX_CONCURRENT_REQUESTS = 1; // Sequential processing
 
 // Enhanced delay function with jitter
@@ -19,7 +19,7 @@ const delay = (ms: number) => new Promise(resolve =>
 
 // Improved exponential backoff
 const getBackoffDelay = (attempt: number, isRateLimit: boolean = false) => {
-  const baseDelay = isRateLimit ? 10000 : 2000;
+  const baseDelay = isRateLimit ? 15000 : 3000; // Aumentato delay per rate limiting
   return Math.min(baseDelay * Math.pow(2, attempt), 60000);
 };
 
@@ -153,13 +153,23 @@ export const evaluateQuestionAgainstChunks = async (
   let hasNegativeEvidence = false;
   let confidenceScore = 0;
   
-  const maxChunksToProcess = Math.min(documentChunks.length, 8); // Increased chunk processing
+  const maxChunksToProcess = Math.min(documentChunks.length, 6); // Ridotto per velocizzare
   
   console.log(`🔍 Evaluating question ${question.id} against ${maxChunksToProcess} chunks`);
   console.log(`Question: ${question.text.substring(0, 100)}...`);
   
+  // Aggiungi timeout specifico per questa domanda
+  const questionStartTime = Date.now();
+  const QUESTION_TIMEOUT = 4 * 60 * 1000; // 4 minuti per domanda
+  
   // Process chunks with enhanced strategy
   for (let i = 0; i < maxChunksToProcess; i++) {
+    // Controlla timeout per domanda
+    if (Date.now() - questionStartTime > QUESTION_TIMEOUT) {
+      console.warn(`⏰ Question ${question.id} timeout after ${Math.round((Date.now() - questionStartTime) / 1000)}s`);
+      break;
+    }
+    
     const chunk = documentChunks[i];
     const relevantContent = findRelevantContent(chunk, question.text);
     
@@ -181,8 +191,10 @@ export const evaluateQuestionAgainstChunks = async (
           await delay(backoffDelay);
         }
         
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT);
+        // Timeout più breve per singola chiamata API
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('API call timeout')), API_TIMEOUT);
+        });
         
         // Enhanced system prompt with better instructions
         const systemPrompt = `You are an expert transition plan evaluator specializing in corporate climate transition plans, net-zero commitments, and sustainability reporting. Your role is to analyze document excerpts and determine if they provide evidence for specific transition plan criteria.
@@ -238,36 +250,37 @@ Respond with exactly one word: "Yes", "No", or "Not enough information"
 
 Think carefully - only answer "Yes" if the evidence is clear and specific.`;
 
-        const response = await fetch('https://api.mistral.ai/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${mistralApiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            model: 'mistral-small-2312', // Updated to Mistral Small 3.1
-            messages: [
-              { role: 'system', content: systemPrompt },
-              { role: 'user', content: userPrompt }
-            ],
-            max_tokens: 20,
-            temperature: 0.0 // Reduced temperature to 0.0 for maximum consistency
-          }),
-          signal: controller.signal
-        });
+        const apiCallPromise = async () => {
+          const response = await fetch('https://api.mistral.ai/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${mistralApiKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              model: 'mistral-small-2312',
+              messages: [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: userPrompt }
+              ],
+              max_tokens: 20,
+              temperature: 0.0
+            })
+          });
 
-        clearTimeout(timeoutId);
+          if (response.status === 429) {
+            isRateLimit = true;
+            throw new Error('Rate limit exceeded');
+          }
 
-        if (response.status === 429) {
-          isRateLimit = true;
-          throw new Error('Rate limit exceeded');
-        }
+          if (!response.ok) {
+            throw new Error(`API responded with status: ${response.status} - ${response.statusText}`);
+          }
 
-        if (!response.ok) {
-          throw new Error(`API responded with status: ${response.status} - ${response.statusText}`);
-        }
+          return response.json();
+        };
 
-        const data = await response.json();
+        const data = await Promise.race([apiCallPromise(), timeoutPromise]);
         
         if (!data.choices || !data.choices[0] || !data.choices[0].message) {
           throw new Error('Invalid API response structure');
@@ -303,8 +316,8 @@ Think carefully - only answer "Yes" if the evidence is clear and specific.`;
           }
         }
         
-        // Early termination with higher confidence threshold
-        if (hasPositiveEvidence && successfulCalls >= 4 && confidenceScore >= 10) {
+        // Early termination con soglia più bassa per velocizzare
+        if (hasPositiveEvidence && successfulCalls >= 2 && confidenceScore >= 6) {
           console.log(`🎯 Early termination: Strong positive evidence found (confidence: ${confidenceScore})`);
           break;
         }
@@ -319,14 +332,16 @@ Think carefully - only answer "Yes" if the evidence is clear and specific.`;
           isRateLimit = true;
         }
         
-        if (error.name === 'AbortError') {
+        if (error.message.includes('timeout') || error.message.includes('API call timeout')) {
           console.warn(`⏰ Timeout processing chunk ${i + 1} for question ${question.id}`);
+          // Per timeout, prova il prossimo chunk invece di rifare retry
+          break;
         }
       }
     }
     
-    // Break if we have strong evidence
-    if (hasPositiveEvidence && successfulCalls >= 3 && confidenceScore >= 8) {
+    // Break se abbiamo evidenza sufficiente
+    if (hasPositiveEvidence && successfulCalls >= 2 && confidenceScore >= 6) {
       break;
     }
   }
@@ -343,7 +358,8 @@ Think carefully - only answer "Yes" if the evidence is clear and specific.`;
     questionScore = (question.weight || 1) * infoMultiplier;
   }
   
-  console.log(`📊 Question ${question.id} final result: ${bestResponse} (score: ${questionScore}/${question.weight || 1}, calls: ${successfulCalls}, confidence: ${confidenceScore})`);
+  const processingTime = Date.now() - questionStartTime;
+  console.log(`📊 Question ${question.id} final result: ${bestResponse} (score: ${questionScore}/${question.weight || 1}, calls: ${successfulCalls}, confidence: ${confidenceScore}, time: ${Math.round(processingTime/1000)}s)`);
   
   return {
     questionId: question.id,
