@@ -9,6 +9,7 @@ import { Upload, File, CheckCircle, AlertTriangle } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
+import { extractTextFromPdfAdvanced, isPdfReadable } from '@/utils/advancedPdfReader';
 
 interface FileUploadProps {
   onUploadComplete: (documentId: string) => void;
@@ -20,6 +21,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
   const [uploadComplete, setUploadComplete] = useState(false);
   const [error, setError] = useState('');
   const [sizeWarning, setSizeWarning] = useState('');
+  const [pdfPreview, setPdfPreview] = useState<string>('');
   const { user } = useAuth();
   const { toast } = useToast();
 
@@ -27,7 +29,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
   const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
   const LARGE_FILE_WARNING = 3 * 1024 * 1024; // 3MB
 
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = event.target.files?.[0];
     if (selectedFile) {
       const allowedTypes = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
@@ -36,6 +38,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
         setError('Please select a PDF or DOCX file');
         setFile(null);
         setSizeWarning('');
+        setPdfPreview('');
         return;
       }
 
@@ -43,6 +46,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
         setError(`File size exceeds ${MAX_FILE_SIZE / (1024 * 1024)}MB limit`);
         setFile(null);
         setSizeWarning('');
+        setPdfPreview('');
         return;
       }
 
@@ -55,6 +59,24 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
         setSizeWarning(`Large file detected (${(selectedFile.size / (1024 * 1024)).toFixed(1)}MB). Processing may take longer and the document might be truncated for assessment.`);
       } else {
         setSizeWarning('');
+      }
+
+      // Preview PDF content if it's a PDF
+      if (selectedFile.type === 'application/pdf') {
+        try {
+          const result = await extractTextFromPdfAdvanced(selectedFile);
+          const preview = result.text.substring(0, 500) + (result.text.length > 500 ? '...' : '');
+          setPdfPreview(preview);
+          
+          if (!isPdfReadable(result.text)) {
+            setSizeWarning(prev => prev + ' The PDF appears to contain mostly images or unreadable text.');
+          }
+        } catch (err) {
+          console.warn('PDF preview failed:', err);
+          setPdfPreview('Unable to preview PDF content');
+        }
+      } else {
+        setPdfPreview('');
       }
     }
   };
@@ -143,6 +165,15 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
           )}
         </div>
 
+        {pdfPreview && (
+          <div className="space-y-2">
+            <Label className="text-sm font-medium">PDF Content Preview:</Label>
+            <div className="p-3 bg-muted rounded-md text-sm font-mono max-h-32 overflow-y-auto">
+              {pdfPreview}
+            </div>
+          </div>
+        )}
+
         {sizeWarning && (
           <Alert>
             <AlertTriangle className="h-4 w-4" />
@@ -176,7 +207,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
         <div className="text-xs text-muted-foreground">
           <p>• Maximum file size: {MAX_FILE_SIZE / (1024 * 1024)}MB</p>
           <p>• Supported formats: PDF, DOCX</p>
-          <p>• Large documents may be truncated for processing</p>
+          <p>• Enhanced PDF text extraction with preview</p>
         </div>
       </CardContent>
     </Card>
