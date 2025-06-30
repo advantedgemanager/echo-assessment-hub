@@ -10,6 +10,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import { extractTextFromPdfAdvanced, isPdfReadable } from '@/utils/advancedPdfReader';
+import { extractTextFromDocxAdvanced, isDocxReadable } from '@/utils/advancedDocxReader';
 
 interface FileUploadProps {
   onUploadComplete: (documentId: string) => void;
@@ -21,8 +22,9 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
   const [uploadComplete, setUploadComplete] = useState(false);
   const [error, setError] = useState('');
   const [sizeWarning, setSizeWarning] = useState('');
-  const [pdfPreview, setPdfPreview] = useState<string>('');
+  const [documentPreview, setDocumentPreview] = useState<string>('');
   const [extractedText, setExtractedText] = useState<string>('');
+  const [documentType, setDocumentType] = useState<'pdf' | 'docx' | null>(null);
   const { user } = useAuth();
   const { toast } = useToast();
 
@@ -37,25 +39,23 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
       
       if (!allowedTypes.includes(selectedFile.type)) {
         setError('Please select a PDF or DOCX file');
-        setFile(null);
-        setSizeWarning('');
-        setPdfPreview('');
-        setExtractedText('');
+        resetFileState();
         return;
       }
 
       if (selectedFile.size > MAX_FILE_SIZE) {
         setError(`File size exceeds ${MAX_FILE_SIZE / (1024 * 1024)}MB limit`);
-        setFile(null);
-        setSizeWarning('');
-        setPdfPreview('');
-        setExtractedText('');
+        resetFileState();
         return;
       }
 
       setFile(selectedFile);
       setError('');
       setUploadComplete(false);
+
+      // Determina il tipo di documento
+      const fileType = selectedFile.type === 'application/pdf' ? 'pdf' : 'docx';
+      setDocumentType(fileType);
 
       // Show warning for large files
       if (selectedFile.size > LARGE_FILE_WARNING) {
@@ -64,27 +64,43 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
         setSizeWarning('');
       }
 
-      // Extract text from PDF and store it
-      if (selectedFile.type === 'application/pdf') {
-        try {
-          const result = await extractTextFromPdfAdvanced(selectedFile);
-          const preview = result.text.substring(0, 500) + (result.text.length > 500 ? '...' : '');
-          setPdfPreview(preview);
-          setExtractedText(result.text); // Store full extracted text
-          
-          if (!isPdfReadable(result.text)) {
-            setSizeWarning(prev => prev + ' The PDF appears to contain mostly images or unreadable text.');
-          }
-        } catch (err) {
-          console.warn('PDF preview failed:', err);
-          setPdfPreview('Unable to preview PDF content');
-          setExtractedText(''); // Clear extracted text on error
+      // Extract text based on file type
+      try {
+        let result;
+        let isReadable = false;
+        
+        if (fileType === 'pdf') {
+          console.log('📄 Processing PDF with advanced extraction...');
+          result = await extractTextFromPdfAdvanced(selectedFile);
+          isReadable = isPdfReadable(result.text);
+        } else {
+          console.log('📄 Processing DOCX with advanced extraction...');
+          result = await extractTextFromDocxAdvanced(selectedFile);
+          isReadable = isDocxReadable(result.text);
         }
-      } else {
-        setPdfPreview('');
-        setExtractedText(''); // For DOCX files, we'll handle text extraction in backend
+        
+        const preview = result.text.substring(0, 500) + (result.text.length > 500 ? '...' : '');
+        setDocumentPreview(preview);
+        setExtractedText(result.text);
+        
+        if (!isReadable) {
+          setSizeWarning(prev => prev + ` The ${fileType.toUpperCase()} appears to contain mostly unreadable text or formatting artifacts.`);
+        }
+      } catch (err) {
+        console.warn(`${fileType.toUpperCase()} preview failed:`, err);
+        setDocumentPreview(`Unable to preview ${fileType.toUpperCase()} content`);
+        setExtractedText('');
+        setSizeWarning(prev => prev + ` Text extraction from ${fileType.toUpperCase()} failed. The document may be corrupted or password-protected.`);
       }
     }
+  };
+
+  const resetFileState = () => {
+    setFile(null);
+    setSizeWarning('');
+    setDocumentPreview('');
+    setExtractedText('');
+    setDocumentType(null);
   };
 
   const handleUpload = async () => {
@@ -105,7 +121,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
 
       if (uploadError) throw uploadError;
 
-      // Record the document in the database with extracted text (if available)
+      // Record the document in the database with extracted text
       const { data: documentData, error: dbError } = await supabase
         .from('uploaded_documents')
         .insert({
@@ -114,9 +130,9 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
           file_path: filePath,
           file_size: file.size,
           file_type: file.type,
-          document_text: extractedText || null, // Store extracted text directly
+          document_text: extractedText || null,
           is_temporary: true,
-          assessment_status: extractedText ? 'processed' : 'pending' // Set status based on whether we have text
+          assessment_status: extractedText ? 'processed' : 'pending'
         })
         .select()
         .single();
@@ -126,7 +142,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
       setUploadComplete(true);
       toast({
         title: 'Upload Successful',
-        description: 'Your document has been uploaded successfully.',
+        description: `Your ${documentType?.toUpperCase()} document has been uploaded successfully.`,
       });
 
       onUploadComplete(documentData.id);
@@ -167,20 +183,27 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
           {file && (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <File className="h-4 w-4" />
-              {file.name} ({(file.size / 1024 / 1024).toFixed(2)} MB)
+              {file.name} ({(file.size / 1024 / 1024).toFixed(2)} MB) - {documentType?.toUpperCase()}
             </div>
           )}
         </div>
 
-        {pdfPreview && (
+        {documentPreview && (
           <div className="space-y-2">
-            <Label className="text-sm font-medium">PDF Content Preview:</Label>
+            <Label className="text-sm font-medium">
+              {documentType?.toUpperCase()} Content Preview:
+            </Label>
             <div className="p-3 bg-muted rounded-md text-sm font-mono max-h-32 overflow-y-auto">
-              {pdfPreview}
+              {documentPreview}
             </div>
             {extractedText && (
               <div className="text-xs text-green-600">
                 ✓ Text extracted successfully ({extractedText.length} characters)
+                {documentType === 'docx' && (
+                  <span className="ml-2">
+                    ({Math.round(extractedText.split(/\s+/).length)} words)
+                  </span>
+                )}
               </div>
             )}
           </div>
@@ -219,8 +242,9 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
         <div className="text-xs text-muted-foreground">
           <p>• Maximum file size: {MAX_FILE_SIZE / (1024 * 1024)}MB</p>
           <p>• Supported formats: PDF, DOCX</p>
-          <p>• Enhanced PDF text extraction with preview</p>
+          <p>• Enhanced text extraction with preview for both formats</p>
           <p>• Text is extracted during upload for better accuracy</p>
+          <p>• Both PDF and DOCX files are processed in the frontend</p>
         </div>
       </CardContent>
     </Card>
