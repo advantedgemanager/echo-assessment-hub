@@ -27,6 +27,12 @@ interface AssessmentData {
   sections?: Array<any>;
 }
 
+interface QuestionnaireData {
+  sections?: Array<{
+    questions?: Array<any>;
+  }>;
+}
+
 export const useChunkedAssessment = () => {
   const [assessmentState, setAssessmentState] = useState<ChunkedAssessmentState>({
     status: 'idle',
@@ -55,7 +61,7 @@ export const useChunkedAssessment = () => {
         return 95; // fallback default
       }
 
-      const questionnaireData = data.questionnaire_data;
+      const questionnaireData = data.questionnaire_data as QuestionnaireData;
       let totalQuestions = 0;
 
       if (questionnaireData?.sections && Array.isArray(questionnaireData.sections)) {
