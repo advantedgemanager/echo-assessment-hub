@@ -7,20 +7,20 @@ export interface QuestionEvaluation {
   weight: number;
 }
 
-const API_TIMEOUT = 180000; // Ridotto a 3 minuti per evitare blocchi
-const MAX_RETRIES = 2; // Ridotto per velocizzare
-const RATE_LIMIT_DELAY = 3000; // Aumentato delay per rate limiting
+const API_TIMEOUT = 120000; // Ridotto a 2 minuti per evitare blocchi
+const MAX_RETRIES = 1; // Ridotto per velocizzare
+const RATE_LIMIT_DELAY = 2000; // Ridotto delay
 const MAX_CONCURRENT_REQUESTS = 1; // Sequential processing
 
 // Enhanced delay function with jitter
 const delay = (ms: number) => new Promise(resolve => 
-  setTimeout(resolve, ms + Math.random() * 500)
+  setTimeout(resolve, ms + Math.random() * 300)
 );
 
 // Improved exponential backoff
 const getBackoffDelay = (attempt: number, isRateLimit: boolean = false) => {
-  const baseDelay = isRateLimit ? 15000 : 3000; // Aumentato delay per rate limiting
-  return Math.min(baseDelay * Math.pow(2, attempt), 60000);
+  const baseDelay = isRateLimit ? 10000 : 2000; // Ridotto delay per rate limiting
+  return Math.min(baseDelay * Math.pow(1.5, attempt), 30000); // Ridotto exponential factor
 };
 
 // Enhanced transition plan content detection with better keyword extraction
@@ -81,7 +81,7 @@ const findRelevantContent = (chunk: string, questionText: string): string => {
     return b.length - a.length; // Prefer longer sentences if scores are equal
   });
   
-  const selectedSentences = scoredSentences.slice(0, 6).filter(s => s.score > 0);
+  const selectedSentences = scoredSentences.slice(0, 4).filter(s => s.score > 0); // Ridotto a 4 sentences
   
   if (selectedSentences.length > 0) {
     return selectedSentences.map(s => s.sentence.trim()).join('. ') + '.';
@@ -95,12 +95,12 @@ const findRelevantContent = (chunk: string, questionText: string): string => {
   if (keywordIndex !== -1) {
     const keyword = keywords[keywordIndex];
     const keywordPos = chunk.toLowerCase().indexOf(keyword.toLowerCase());
-    const start = Math.max(0, keywordPos - 1000);
-    const end = Math.min(chunk.length, keywordPos + 2000);
+    const start = Math.max(0, keywordPos - 800);
+    const end = Math.min(chunk.length, keywordPos + 1500);
     return chunk.substring(start, end);
   }
   
-  return chunk.substring(0, 2500); // Increased fallback size
+  return chunk.substring(0, 2000); // Ridotto fallback size
 };
 
 const extractEnhancedTransitionKeywords = (questionText: string): string[] => {
@@ -153,14 +153,14 @@ export const evaluateQuestionAgainstChunks = async (
   let hasNegativeEvidence = false;
   let confidenceScore = 0;
   
-  const maxChunksToProcess = Math.min(documentChunks.length, 6); // Ridotto per velocizzare
+  const maxChunksToProcess = Math.min(documentChunks.length, 4); // Ridotto per velocizzare
   
   console.log(`🔍 Evaluating question ${question.id} against ${maxChunksToProcess} chunks`);
   console.log(`Question: ${question.text.substring(0, 100)}...`);
   
   // Aggiungi timeout specifico per questa domanda
   const questionStartTime = Date.now();
-  const QUESTION_TIMEOUT = 4 * 60 * 1000; // 4 minuti per domanda
+  const QUESTION_TIMEOUT = 3 * 60 * 1000; // 3 minuti per domanda
   
   // Process chunks with enhanced strategy
   for (let i = 0; i < maxChunksToProcess; i++) {
@@ -316,8 +316,8 @@ Think carefully - only answer "Yes" if the evidence is clear and specific.`;
           }
         }
         
-        // Early termination con soglia più bassa per velocizzare
-        if (hasPositiveEvidence && successfulCalls >= 2 && confidenceScore >= 6) {
+        // Early termination con soglia ridotta per velocizzare
+        if (hasPositiveEvidence && successfulCalls >= 1 && confidenceScore >= 3) {
           console.log(`🎯 Early termination: Strong positive evidence found (confidence: ${confidenceScore})`);
           break;
         }
@@ -340,8 +340,8 @@ Think carefully - only answer "Yes" if the evidence is clear and specific.`;
       }
     }
     
-    // Break se abbiamo evidenza sufficiente
-    if (hasPositiveEvidence && successfulCalls >= 2 && confidenceScore >= 6) {
+    // Break se abbiamo evidenza sufficiente o dopo primo chunk con risposta
+    if ((hasPositiveEvidence && confidenceScore >= 3) || (successfulCalls >= 1 && bestResponse !== 'Not enough information')) {
       break;
     }
   }
@@ -354,7 +354,7 @@ Think carefully - only answer "Yes" if the evidence is clear and specific.`;
     questionScore = 0;
   } else {
     // Improved scoring for insufficient information based on success rate and confidence
-    const infoMultiplier = Math.min(0.4, (successfulCalls / maxChunksToProcess) * 0.4 + (confidenceScore / 20) * 0.2);
+    const infoMultiplier = Math.min(0.3, (successfulCalls / maxChunksToProcess) * 0.3 + (confidenceScore / 15) * 0.2);
     questionScore = (question.weight || 1) * infoMultiplier;
   }
   
