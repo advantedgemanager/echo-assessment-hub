@@ -24,7 +24,7 @@ export const processAssessment = async (
   checkTimeout: () => void,
   documentWasTruncated: boolean = false
 ) => {
-  console.log('=== Starting enhanced assessment processing v5.1 ===');
+  console.log('=== Starting enhanced assessment processing v5.2 ===');
   console.log(`Processing ${documentChunks.length} document chunks`);
   
   const questionnaire = questionnaireData.questionnaire as Questionnaire;
@@ -62,10 +62,28 @@ export const processAssessment = async (
       const question = section.questions[questionIndex];
       processedQuestions++;
       
-      // Logging dettagliato per debug blocco domanda 19
+      // Enhanced null/undefined checking for question properties
+      if (!question || !question.id || !question.text) {
+        console.error(`❌ Invalid question at index ${questionIndex}:`, question);
+        
+        // Create fallback result for invalid question
+        const fallbackResult = {
+          questionId: question?.id || `invalid_${questionIndex}`,
+          questionText: question?.text || 'Invalid question',
+          response: 'Not enough information' as const,
+          score: 0,
+          weight: question?.weight || 1
+        };
+        
+        sectionQuestions.push(fallbackResult);
+        sectionMaxScore += question?.weight || 1;
+        continue;
+      }
+      
+      // Safe logging with proper null checks
       console.log(`\n🔍 Processing question ${processedQuestions}/${totalQuestions} (Section: ${section.title}, Question ${questionIndex + 1}/${section.questions.length})`);
       console.log(`Question ID: ${question.id}`);
-      console.log(`Question text: ${question.text.substring(0, 150)}...`);
+      console.log(`Question text: ${question.text.length > 150 ? question.text.substring(0, 150) + '...' : question.text}`);
       
       // Timeout check più frequente
       checkTimeout();
@@ -78,7 +96,7 @@ export const processAssessment = async (
         const questionResult = await Promise.race([
           evaluateQuestionAgainstChunks(question, documentChunks, mistralApiKey),
           new Promise((_, reject) => 
-            setTimeout(() => reject(new Error(`Question ${question.id} timeout`)), 5 * 60 * 1000) // 5 minuti per domanda
+            setTimeout(() => reject(new Error(`Question ${question.id} timeout`)), 4 * 60 * 1000) // Ridotto a 4 minuti per domanda
           )
         ]);
         
