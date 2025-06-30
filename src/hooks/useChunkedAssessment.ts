@@ -118,28 +118,18 @@ export const useChunkedAssessment = () => {
         }));
       }, 3 * 60 * 1000); // 3 minutes
 
-      // Set up an AbortController for the request with extended timeout
-      const controller = new AbortController();
-      const requestTimeoutId = setTimeout(() => {
-        controller.abort();
-      }, 8 * 60 * 1000); // 8 minutes timeout
-
       const { data, error } = await supabase.functions.invoke('assess-document', {
-        body: { documentId, userId },
-        signal: controller.signal
+        body: { documentId, userId }
       });
 
-      // Clear timeouts on success
+      // Clear timeout on success
       clearTimeout(timeoutId);
-      clearTimeout(requestTimeoutId);
 
       if (error) {
         console.error('Invoke error:', error);
         
         // Handle specific error types
-        if (error.message?.includes('AbortError') || error.message?.includes('timeout')) {
-          throw new Error('Assessment timed out. This can happen with large documents. Please try again or contact support if the issue persists.');
-        } else if (error.message?.includes('Failed to fetch')) {
+        if (error.message?.includes('Failed to fetch')) {
           throw new Error('Network connection lost during assessment. Please check your internet connection and try again.');
         } else {
           throw new Error(error.message || 'Failed to invoke assessment function');
@@ -178,7 +168,7 @@ export const useChunkedAssessment = () => {
       });
 
     } catch (error: any) {
-      // Clear timeouts on error
+      // Clear timeout on error
       if (timeoutId) clearTimeout(timeoutId);
       
       console.error('Assessment error:', error);
@@ -186,9 +176,7 @@ export const useChunkedAssessment = () => {
       let errorMessage = error.message || 'Failed to process assessment';
       
       // Provide more specific error messages
-      if (error.name === 'AbortError') {
-        errorMessage = 'Assessment timed out after 8 minutes. This can happen with very large documents or high server load. Please try again later.';
-      } else if (errorMessage.includes('Failed to fetch')) {
+      if (errorMessage.includes('Failed to fetch')) {
         errorMessage = 'Network connection error. Please check your internet connection and try again.';
       } else if (errorMessage.includes('timeout')) {
         errorMessage = 'Assessment timed out. The document may be too large or the server is experiencing high load. Please try again later.';
