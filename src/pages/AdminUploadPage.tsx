@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -42,10 +41,32 @@ const AdminUploadPage = () => {
   const validateQuestionnaireStructure = (data: any): boolean => {
     console.log('Validating questionnaire structure:', {
       topLevelKeys: Object.keys(data),
+      isArray: Array.isArray(data),
       hasTransitionPlan: !!data.transition_plan_questionnaire,
       hasSections: !!data.sections,
-      hasBasicSections: !!data.basic_assessment_sections
+      hasBasicSections: !!data.basic_assessment_sections,
+      hasQuestionnaireData: !!data.questionnaire_data
     });
+
+    // Handle array wrapper format [{ questionnaire_data: {...} }]
+    if (Array.isArray(data) && data.length > 0) {
+      console.log('Found array wrapper, extracting first element');
+      return validateQuestionnaireStructure(data[0]);
+    }
+
+    // Handle questionnaire_data wrapper format
+    if (data.questionnaire_data) {
+      console.log('Found questionnaire_data wrapper structure');
+      const questionnaire = data.questionnaire_data;
+      
+      if (questionnaire.sections && Array.isArray(questionnaire.sections)) {
+        console.log('Valid questionnaire_data with sections array');
+        return true;
+      }
+      
+      setErrorMessage('Invalid questionnaire_data format: missing sections array');
+      return false;
+    }
 
     // Enhanced validation - accept multiple formats
     if (data.transition_plan_questionnaire) {
@@ -115,6 +136,7 @@ const AdminUploadPage = () => {
         questionnaireData = JSON.parse(fileContent);
         console.log('JSON parsed successfully, structure preview:', {
           topLevelKeys: Object.keys(questionnaireData),
+          isArray: Array.isArray(questionnaireData),
           fileSize: fileContent.length
         });
       } catch (parseError) {
@@ -130,13 +152,30 @@ const AdminUploadPage = () => {
         return;
       }
 
+      // Transform the data if needed to extract from wrappers
+      let finalQuestionnaireData = questionnaireData;
+      
+      // Handle array wrapper
+      if (Array.isArray(questionnaireData) && questionnaireData.length > 0) {
+        finalQuestionnaireData = questionnaireData[0];
+        console.log('Extracted questionnaire from array wrapper');
+      }
+      
+      // Handle questionnaire_data wrapper
+      if (finalQuestionnaireData.questionnaire_data) {
+        finalQuestionnaireData = finalQuestionnaireData.questionnaire_data;
+        console.log('Extracted questionnaire from questionnaire_data wrapper');
+      }
+
       console.log('Structure validation passed, uploading to server...');
+      console.log('Final questionnaire data keys:', Object.keys(finalQuestionnaireData));
+      console.log('Total questions:', finalQuestionnaireData.totalQuestions || 'unknown');
 
       // Upload using the utility function
       const success = await uploadCredibilityQuestionnaire(
-        questionnaireData,
+        finalQuestionnaireData,
         version,
-        description || 'Credibility assessment questionnaire'
+        description || finalQuestionnaireData.description || 'Credibility assessment questionnaire'
       );
 
       if (success) {
@@ -144,7 +183,7 @@ const AdminUploadPage = () => {
         setUploadStatus('success');
         toast({
           title: 'Upload Successful',
-          description: 'Questionnaire has been uploaded and is now active.',
+          description: `Questionnaire with ${finalQuestionnaireData.totalQuestions || 'multiple'} questions has been uploaded and is now active.`,
         });
       } else {
         throw new Error('Upload failed');
@@ -260,9 +299,11 @@ const AdminUploadPage = () => {
         <div className="mt-8 p-4 bg-muted rounded-lg">
           <h3 className="font-semibold mb-2">Supported Formats:</h3>
           <ul className="text-sm text-muted-foreground space-y-1">
-            <li>• <strong>Format 1:</strong> {"{ transition_plan_questionnaire: { basic_assessment_sections: {...} } }"}</li>
-            <li>• <strong>Format 2:</strong> {"{ sections: [...] }"}</li>
-            <li>• <strong>Format 3:</strong> {"{ basic_assessment_sections: {...} }"}</li>
+            <li>• <strong>Format 1:</strong> {"[{ questionnaire_data: { sections: [...] } }]"}</li>
+            <li>• <strong>Format 2:</strong> {"{ questionnaire_data: { sections: [...] } }"}</li>
+            <li>• <strong>Format 3:</strong> {"{ transition_plan_questionnaire: { basic_assessment_sections: {...} } }"}</li>
+            <li>• <strong>Format 4:</strong> {"{ sections: [...] }"}</li>
+            <li>• <strong>Format 5:</strong> {"{ basic_assessment_sections: {...} }"}</li>
             <li>• The system will automatically detect and transform your format</li>
             <li>• Check browser console for detailed validation logs</li>
           </ul>
