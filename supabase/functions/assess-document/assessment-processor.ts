@@ -3,8 +3,12 @@ import { evaluateQuestionAgainstChunks } from './ai-evaluator.ts';
 
 interface Question {
   id: string;
-  text: string;
-  weight: number;
+  text?: string;
+  question_text?: string;
+  weight?: number;
+  score_yes?: number;
+  score_no?: number;
+  score_na?: number;
 }
 
 interface Section {
@@ -17,6 +21,15 @@ interface Questionnaire {
   sections: Section[];
 }
 
+// Helper function to normalize question format
+const normalizeQuestion = (question: Question) => {
+  return {
+    id: question.id,
+    text: question.text || question.question_text || '',
+    weight: question.weight || question.score_yes || 1
+  };
+};
+
 export const processAssessment = async (
   questionnaireData: any,
   documentChunks: string[],
@@ -24,7 +37,7 @@ export const processAssessment = async (
   checkTimeout: () => void,
   documentWasTruncated: boolean = false
 ) => {
-  console.log('=== Starting enhanced assessment processing v5.2 ===');
+  console.log('=== Starting enhanced assessment processing v5.3 ===');
   console.log(`Processing ${documentChunks.length} document chunks`);
   
   const questionnaire = questionnaireData.questionnaire as Questionnaire;
@@ -59,31 +72,35 @@ export const processAssessment = async (
     
     // Process each question in the section
     for (let questionIndex = 0; questionIndex < section.questions.length; questionIndex++) {
-      const question = section.questions[questionIndex];
+      const rawQuestion = section.questions[questionIndex];
       processedQuestions++;
       
       // Enhanced null/undefined checking for question properties
-      if (!question || !question.id || !question.text) {
-        console.error(`❌ Invalid question at index ${questionIndex}:`, question);
+      if (!rawQuestion || !rawQuestion.id || (!rawQuestion.text && !rawQuestion.question_text)) {
+        console.error(`❌ Invalid question at index ${questionIndex}:`, rawQuestion);
         
         // Create fallback result for invalid question
         const fallbackResult = {
-          questionId: question?.id || `invalid_${questionIndex}`,
-          questionText: question?.text || 'Invalid question',
+          questionId: rawQuestion?.id || `invalid_${questionIndex}`,
+          questionText: rawQuestion?.text || rawQuestion?.question_text || 'Invalid question',
           response: 'Not enough information' as const,
           score: 0,
-          weight: question?.weight || 1
+          weight: rawQuestion?.weight || rawQuestion?.score_yes || 1
         };
         
         sectionQuestions.push(fallbackResult);
-        sectionMaxScore += question?.weight || 1;
+        sectionMaxScore += rawQuestion?.weight || rawQuestion?.score_yes || 1;
         continue;
       }
+      
+      // Normalize the question to standard format
+      const question = normalizeQuestion(rawQuestion);
       
       // Safe logging with proper null checks
       console.log(`\n🔍 Processing question ${processedQuestions}/${totalQuestions} (Section: ${section.title}, Question ${questionIndex + 1}/${section.questions.length})`);
       console.log(`Question ID: ${question.id}`);
       console.log(`Question text: ${question.text.length > 150 ? question.text.substring(0, 150) + '...' : question.text}`);
+      console.log(`Question weight: ${question.weight}`);
       
       // Timeout check più frequente
       checkTimeout();
