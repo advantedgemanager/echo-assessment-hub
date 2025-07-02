@@ -1,3 +1,4 @@
+
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -21,7 +22,7 @@ serve(async (req) => {
     });
     
     const { action, questionnaire_data, version, description } = requestBody;
-    console.log(`🚀 Questionnaire manager v5.1 - Action: ${action} - Timestamp: ${new Date().toISOString()}`);
+    console.log(`🚀 Questionnaire manager v5.2 - Action: ${action} - Timestamp: ${new Date().toISOString()}`);
 
     // Initialize Supabase client
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
@@ -29,7 +30,7 @@ serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     if (action === 'upload') {
-      console.log('=== Questionnaire Upload v5.1 ===');
+      console.log('=== Questionnaire Upload v5.2 ===');
       
       try {
         if (!questionnaire_data) {
@@ -40,7 +41,7 @@ serve(async (req) => {
         console.log('Available top-level keys:', Object.keys(questionnaire_data));
 
         let transformedQuestionnaire;
-        let finalVersion = version || '5.1';
+        let finalVersion = version || '5.2';
         let totalQuestions = 0;
 
         // Handle nested transition_plan_questionnaire structure
@@ -164,13 +165,12 @@ serve(async (req) => {
         
         console.log(`💾 Saving questionnaire: ${fileName} (${totalQuestions} questions) - Fresh at ${enhancedQuestionnaire.lastModified}`);
 
-        // Deactivate existing questionnaires with explicit timestamp logging
+        // Deactivate existing questionnaires - using only uploaded_at column
         console.log('🔄 Deactivating existing questionnaires...');
         const { error: deactivateError } = await supabase
           .from('questionnaire_metadata')
           .update({ 
-            is_active: false,
-            updated_at: new Date().toISOString() // Force timestamp update
+            is_active: false
           })
           .eq('is_active', true);
 
@@ -178,7 +178,7 @@ serve(async (req) => {
           console.warn('⚠️ Warning: Could not deactivate existing questionnaires:', deactivateError);
         }
 
-        // Insert the new questionnaire with explicit timestamps
+        // Insert the new questionnaire - using only uploaded_at column
         console.log('📥 Inserting new questionnaire with fresh timestamp...');
         const { data: insertData, error: insertError } = await supabase
           .from('questionnaire_metadata')
@@ -189,8 +189,7 @@ serve(async (req) => {
             description: enhancedQuestionnaire.description,
             questionnaire_data: enhancedQuestionnaire,
             is_active: true,
-            uploaded_at: new Date().toISOString(),
-            updated_at: new Date().toISOString() // Explicit update timestamp
+            uploaded_at: new Date().toISOString()
           })
           .select()
           .single();
@@ -244,17 +243,16 @@ serve(async (req) => {
     }
 
     if (action === 'retrieve') {
-      console.log('=== Questionnaire Retrieval v5.1 - FRESH QUERY ===');
+      console.log('=== Questionnaire Retrieval v5.2 - FRESH QUERY ===');
       
       try {
-        // Force fresh query with explicit ordering and no cache
+        // Force fresh query with explicit ordering and no cache - using only uploaded_at column
         console.log('🔍 Executing FRESH database query for active questionnaire...');
         const { data: activeQuestionnaire, error: dbError } = await supabase
           .from('questionnaire_metadata')
           .select('*')
           .eq('is_active', true)
           .order('uploaded_at', { ascending: false })
-          .order('updated_at', { ascending: false })
           .limit(1)
           .maybeSingle();
 
@@ -277,7 +275,6 @@ serve(async (req) => {
             metadata: {
               version: activeQuestionnaire.version,
               uploaded_at: activeQuestionnaire.uploaded_at,
-              updated_at: activeQuestionnaire.updated_at,
               description: activeQuestionnaire.description,
               totalQuestions: questionnaireData?.totalQuestions,
               enhanced: questionnaireData?.enhanced,
@@ -300,7 +297,7 @@ serve(async (req) => {
         
         // Fallback questionnaire
         const fallbackQuestionnaire = {
-          version: "5.1",
+          version: "5.2",
           title: "Fallback Transition Plan Assessment",
           description: "Basic fallback questionnaire",
           totalQuestions: 4,
@@ -348,7 +345,7 @@ serve(async (req) => {
         return new Response(JSON.stringify({
           questionnaire: fallbackQuestionnaire,
           metadata: {
-            version: '5.1',
+            version: '5.2',
             uploaded_at: new Date().toISOString(),
             description: 'Fallback questionnaire',
             totalQuestions: 4,
@@ -385,7 +382,7 @@ serve(async (req) => {
     );
 
   } catch (error) {
-    console.error('❌ Error in questionnaire-manager v5.1:', error);
+    console.error('❌ Error in questionnaire-manager v5.2:', error);
     return new Response(
       JSON.stringify({ 
         error: error.message,
