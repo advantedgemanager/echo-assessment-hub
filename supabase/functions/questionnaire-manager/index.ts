@@ -22,7 +22,7 @@ serve(async (req) => {
     });
     
     const { action, questionnaire_data, version, description } = requestBody;
-    console.log(`🚀 Questionnaire manager v5.2 - Action: ${action} - Timestamp: ${new Date().toISOString()}`);
+    console.log(`🚀 Questionnaire manager v6.0 - Action: ${action} - Timestamp: ${new Date().toISOString()}`);
 
     // Initialize Supabase client
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
@@ -30,142 +30,23 @@ serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     if (action === 'upload') {
-      console.log('=== Questionnaire Upload v5.2 ===');
+      console.log('=== Questionnaire Upload v6.0 - NO TRANSFORMATIONS ===');
       
       try {
         if (!questionnaire_data) {
           throw new Error('Missing questionnaire data in request');
         }
 
-        console.log('📋 Analyzing questionnaire structure...');
-        console.log('Available top-level keys:', Object.keys(questionnaire_data));
+        console.log('📋 Saving original JSON structure without modifications...');
+        console.log('Original JSON keys:', Object.keys(questionnaire_data));
 
-        let transformedQuestionnaire;
-        let finalVersion = version || '5.2';
-        let totalQuestions = 0;
-
-        // Handle nested transition_plan_questionnaire structure
-        if (questionnaire_data.transition_plan_questionnaire) {
-          console.log('📋 Processing nested transition_plan_questionnaire format');
-          const tpq = questionnaire_data.transition_plan_questionnaire;
-          
-          console.log('TPQ structure keys:', Object.keys(tpq));
-          
-          // Extract metadata if available
-          const metadata = tpq.metadata || {};
-          const title = metadata.title || 'Transition Plan Credibility Assessment';
-          const desc = metadata.description || 'Comprehensive credibility assessment questionnaire';
-          
-          let sectionsArray = [];
-          
-          // Handle basic_assessment_sections (object format)
-          if (tpq.basic_assessment_sections) {
-            console.log('🔧 Converting basic_assessment_sections object to array format');
-            const sections = tpq.basic_assessment_sections;
-            
-            for (const [sectionKey, sectionData] of Object.entries(sections)) {
-              if (sectionData && typeof sectionData === 'object') {
-                const section = {
-                  id: sectionKey,
-                  title: sectionData.title || sectionKey.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
-                  description: sectionData.description || '',
-                  questions: sectionData.questions || []
-                };
-                sectionsArray.push(section);
-                totalQuestions += section.questions.length;
-                console.log(`✅ Section ${sectionKey}: ${section.questions.length} questions`);
-              }
-            }
-          }
-          // Handle direct sections array
-          else if (tpq.sections && Array.isArray(tpq.sections)) {
-            console.log('📋 Using direct sections array');
-            sectionsArray = tpq.sections;
-            totalQuestions = sectionsArray.reduce((total, section) => {
-              return total + (section.questions ? section.questions.length : 0);
-            }, 0);
-          }
-          // Handle sections as object (convert to array)
-          else if (tpq.sections && typeof tpq.sections === 'object') {
-            console.log('🔧 Converting sections object to array format');
-            for (const [sectionKey, sectionData] of Object.entries(tpq.sections)) {
-              if (sectionData && typeof sectionData === 'object') {
-                const section = {
-                  id: sectionKey,
-                  title: sectionData.title || sectionKey.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
-                  description: sectionData.description || '',
-                  questions: sectionData.questions || []
-                };
-                sectionsArray.push(section);
-                totalQuestions += section.questions.length;
-                console.log(`✅ Section ${sectionKey}: ${section.questions.length} questions`);
-              }
-            }
-          }
-          
-          if (sectionsArray.length === 0) {
-            throw new Error('No valid sections found in transition_plan_questionnaire structure');
-          }
-          
-          transformedQuestionnaire = {
-            version: finalVersion,
-            title: title,
-            description: desc,
-            sections: sectionsArray
-          };
-        }
-        // Handle direct sections array format
-        else if (questionnaire_data.sections && Array.isArray(questionnaire_data.sections)) {
-          console.log('📋 Processing direct sections array format');
-          transformedQuestionnaire = {
-            version: finalVersion,
-            title: questionnaire_data.title || 'Transition Plan Credibility Assessment',
-            description: questionnaire_data.description || 'Comprehensive credibility assessment questionnaire',
-            sections: questionnaire_data.sections
-          };
-          totalQuestions = transformedQuestionnaire.sections.reduce((total, section) => {
-            return total + (section.questions ? section.questions.length : 0);
-          }, 0);
-        }
-        else {
-          const availableKeys = Object.keys(questionnaire_data);
-          console.error('❌ Unsupported questionnaire format. Available keys:', availableKeys);
-          throw new Error(`Unsupported questionnaire format. Available keys: ${availableKeys.join(', ')}`);
-        }
-
-        // Final validation
-        if (!transformedQuestionnaire.sections || !Array.isArray(transformedQuestionnaire.sections)) {
-          console.error('❌ Transformation failed: sections is not an array');
-          throw new Error('Questionnaire transformation failed: sections must be an array');
-        }
-
-        console.log(`✅ Questionnaire transformed successfully:`);
-        console.log(`   - Sections: ${transformedQuestionnaire.sections.length}`);
-        console.log(`   - Total Questions: ${totalQuestions}`);
-        console.log(`   - Title: ${transformedQuestionnaire.title}`);
-
-        if (totalQuestions === 0) {
-          throw new Error('No questions found in questionnaire sections');
-        }
-
-        // Enhanced questionnaire structure with metadata and cache-busting timestamp
-        const enhancedQuestionnaire = {
-          version: finalVersion,
-          title: transformedQuestionnaire.title,
-          description: transformedQuestionnaire.description,
-          totalQuestions: totalQuestions,
-          sections: transformedQuestionnaire.sections,
-          uploadedAt: new Date().toISOString(),
-          lastModified: Date.now(), // Cache-busting timestamp
-          enhanced: true
-        };
-
+        const finalVersion = version || '6.0';
         const fileName = `questionnaire_v${finalVersion}.json`;
         const filePath = `/questionnaires/v${finalVersion}`;
         
-        console.log(`💾 Saving questionnaire: ${fileName} (${totalQuestions} questions) - Fresh at ${enhancedQuestionnaire.lastModified}`);
+        console.log(`💾 Saving questionnaire: ${fileName} - Original structure preserved`);
 
-        // Deactivate existing questionnaires - using only uploaded_at column
+        // Deactivate existing questionnaires
         console.log('🔄 Deactivating existing questionnaires...');
         const { error: deactivateError } = await supabase
           .from('questionnaire_metadata')
@@ -178,16 +59,16 @@ serve(async (req) => {
           console.warn('⚠️ Warning: Could not deactivate existing questionnaires:', deactivateError);
         }
 
-        // Insert the new questionnaire - using only uploaded_at column
-        console.log('📥 Inserting new questionnaire with fresh timestamp...');
+        // Insert the new questionnaire with ORIGINAL structure
+        console.log('📥 Inserting new questionnaire with original JSON structure...');
         const { data: insertData, error: insertError } = await supabase
           .from('questionnaire_metadata')
           .insert({
             file_name: fileName,
             file_path: filePath,
             version: finalVersion,
-            description: enhancedQuestionnaire.description,
-            questionnaire_data: enhancedQuestionnaire,
+            description: description || 'Questionnaire uploaded without modifications',
+            questionnaire_data: questionnaire_data, // ORIGINAL JSON - NO TRANSFORMATIONS
             is_active: true,
             uploaded_at: new Date().toISOString()
           })
@@ -199,23 +80,19 @@ serve(async (req) => {
           throw new Error(`Failed to save questionnaire: ${insertError.message}`);
         }
 
-        console.log('🎉 Questionnaire uploaded successfully with fresh data!');
+        console.log('🎉 Questionnaire uploaded successfully with original structure!');
         console.log(`   - ID: ${insertData.id}`);
         console.log(`   - Version: ${finalVersion}`);
-        console.log(`   - Questions: ${totalQuestions}`);
-        console.log(`   - Sections: ${transformedQuestionnaire.sections.length}`);
+        console.log(`   - Structure: ORIGINAL (no transformations)`);
         console.log(`   - Active: ${insertData.is_active}`);
-        console.log(`   - Cache-busting timestamp: ${enhancedQuestionnaire.lastModified}`);
 
         return new Response(JSON.stringify({ 
           success: true, 
           questionnaire_id: insertData.id,
           version: finalVersion,
-          sections_count: transformedQuestionnaire.sections.length,
-          total_questions: totalQuestions,
           is_active: insertData.is_active,
-          cache_buster: enhancedQuestionnaire.lastModified,
-          message: `Questionnaire with ${totalQuestions} questions uploaded and activated successfully`
+          structure: 'original',
+          message: `Questionnaire uploaded successfully with original JSON structure preserved`
         }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
@@ -243,11 +120,10 @@ serve(async (req) => {
     }
 
     if (action === 'retrieve') {
-      console.log('=== Questionnaire Retrieval v5.2 - FRESH QUERY ===');
+      console.log('=== Questionnaire Retrieval v6.0 - ORIGINAL STRUCTURE ===');
       
       try {
-        // Force fresh query with explicit ordering and no cache - using only uploaded_at column
-        console.log('🔍 Executing FRESH database query for active questionnaire...');
+        console.log('🔍 Executing database query for active questionnaire...');
         const { data: activeQuestionnaire, error: dbError } = await supabase
           .from('questionnaire_metadata')
           .select('*')
@@ -263,23 +139,19 @@ serve(async (req) => {
 
         if (activeQuestionnaire) {
           const questionnaireData = activeQuestionnaire.questionnaire_data;
-          const cacheBuster = questionnaireData?.lastModified || Date.now();
           
-          console.log(`✅ Found FRESH active questionnaire: version ${activeQuestionnaire.version}`);
-          console.log(`📊 Details: ${questionnaireData?.sections?.length || 0} sections, ${questionnaireData?.totalQuestions || 'unknown'} questions`);
+          console.log(`✅ Found active questionnaire: version ${activeQuestionnaire.version}`);
+          console.log(`📊 Structure: ORIGINAL (no transformations applied)`);
           console.log(`🕒 Uploaded: ${activeQuestionnaire.uploaded_at}`);
-          console.log(`🔄 Cache-buster: ${cacheBuster}`);
           
           return new Response(JSON.stringify({
-            questionnaire: questionnaireData,
+            questionnaire: questionnaireData, // ORIGINAL structure
             metadata: {
               version: activeQuestionnaire.version,
               uploaded_at: activeQuestionnaire.uploaded_at,
               description: activeQuestionnaire.description,
-              totalQuestions: questionnaireData?.totalQuestions,
-              enhanced: questionnaireData?.enhanced,
               is_active: activeQuestionnaire.is_active,
-              cache_buster: cacheBuster,
+              structure: 'original',
               query_timestamp: new Date().toISOString()
             }
           }), {
@@ -295,64 +167,21 @@ serve(async (req) => {
 
         console.log('⚠️ No active questionnaire found, returning fallback...');
         
-        // Fallback questionnaire
+        // Simple fallback questionnaire
         const fallbackQuestionnaire = {
-          version: "5.2",
-          title: "Fallback Transition Plan Assessment",
-          description: "Basic fallback questionnaire",
-          totalQuestions: 4,
-          enhanced: true,
-          lastModified: Date.now(),
-          sections: [
-            {
-              id: "basic_assessment",
-              title: "Basic Assessment",
-              description: "Essential transition plan questions",
-              questions: [
-                {
-                  id: "q1",
-                  question_text: "Does the organization have a documented transition strategy?",
-                  score_yes: 1,
-                  score_no: 0,
-                  score_na: 0
-                },
-                {
-                  id: "q2",
-                  question_text: "Are there specific emissions reduction targets?",
-                  score_yes: 1,
-                  score_no: 0,
-                  score_na: 0
-                },
-                {
-                  id: "q3",
-                  question_text: "Is there board-level oversight of the transition plan?",
-                  score_yes: 1,
-                  score_no: 0,
-                  score_na: 0
-                },
-                {
-                  id: "q4",
-                  question_text: "Are progress reports published regularly?",
-                  score_yes: 1,
-                  score_no: 0,
-                  score_na: 0
-                }
-              ]
-            }
-          ]
+          fallback: true,
+          message: "No active questionnaire found"
         };
 
         return new Response(JSON.stringify({
           questionnaire: fallbackQuestionnaire,
           metadata: {
-            version: '5.2',
+            version: '6.0',
             uploaded_at: new Date().toISOString(),
             description: 'Fallback questionnaire',
-            totalQuestions: 4,
-            enhanced: true,
             is_active: false,
-            cache_buster: Date.now(),
-            is_fallback: true
+            is_fallback: true,
+            structure: 'original'
           }
         }), {
           headers: { 
@@ -382,7 +211,7 @@ serve(async (req) => {
     );
 
   } catch (error) {
-    console.error('❌ Error in questionnaire-manager v5.2:', error);
+    console.error('❌ Error in questionnaire-manager v6.0:', error);
     return new Response(
       JSON.stringify({ 
         error: error.message,
@@ -391,7 +220,7 @@ serve(async (req) => {
       }),
       {
         status: 500,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       }
     );
   }
