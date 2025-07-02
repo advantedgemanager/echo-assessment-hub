@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -7,7 +6,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { uploadCredibilityQuestionnaire } from '@/utils/questionnaireUtils';
 import { useToast } from '@/hooks/use-toast';
-import { Upload, CheckCircle, AlertCircle, FileText } from 'lucide-react';
+import { Upload, CheckCircle, AlertCircle, Trash2 } from 'lucide-react';
 
 const AdminUploadPage = () => {
   const [file, setFile] = useState<File | null>(null);
@@ -16,55 +15,100 @@ const AdminUploadPage = () => {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState('');
-  const [jsonPreview, setJsonPreview] = useState<string>('');
   const { toast } = useToast();
 
   // Clear any cached questionnaire data on component mount
   useEffect(() => {
+    // Force a refresh of any cached questionnaire data
     localStorage.removeItem('questionnaire-cache');
     sessionStorage.removeItem('questionnaire-cache');
-    console.log('🧹 Cleared questionnaire cache on admin page load');
   }, []);
 
-  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = event.target.files?.[0];
     if (selectedFile) {
       if (selectedFile.type === 'application/json' || selectedFile.name.endsWith('.json')) {
         setFile(selectedFile);
         setUploadStatus('idle');
         setErrorMessage('');
-        
-        // Show JSON preview
-        try {
-          const fileContent = await new Promise<string>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = (e) => resolve(e.target?.result as string);
-            reader.onerror = () => reject(new Error('Failed to read file'));
-            reader.readAsText(selectedFile);
-          });
-          
-          // Parse to validate JSON
-          const parsedJson = JSON.parse(fileContent);
-          
-          // Show preview (first 500 characters)
-          const preview = JSON.stringify(parsedJson, null, 2);
-          setJsonPreview(preview.substring(0, 500) + (preview.length > 500 ? '...' : ''));
-          
-          console.log('✅ JSON file loaded successfully:', {
-            size: selectedFile.size,
-            topLevelKeys: Object.keys(parsedJson)
-          });
-        } catch (error) {
-          setErrorMessage('Invalid JSON format');
-          setFile(null);
-          setJsonPreview('');
-        }
       } else {
         setErrorMessage('Please select a valid JSON file');
         setFile(null);
-        setJsonPreview('');
       }
     }
+  };
+
+  const validateQuestionnaireStructure = (data: any): boolean => {
+    console.log('Validating questionnaire structure:', {
+      topLevelKeys: Object.keys(data),
+      isArray: Array.isArray(data),
+      hasTransitionPlan: !!data.transition_plan_questionnaire,
+      hasSections: !!data.sections,
+      hasBasicSections: !!data.basic_assessment_sections,
+      hasQuestionnaireData: !!data.questionnaire_data
+    });
+
+    // Handle array wrapper format [{ questionnaire_data: {...} }]
+    if (Array.isArray(data) && data.length > 0) {
+      console.log('Found array wrapper, extracting first element');
+      return validateQuestionnaireStructure(data[0]);
+    }
+
+    // Handle questionnaire_data wrapper format
+    if (data.questionnaire_data) {
+      console.log('Found questionnaire_data wrapper structure');
+      const questionnaire = data.questionnaire_data;
+      
+      if (questionnaire.sections && Array.isArray(questionnaire.sections)) {
+        console.log('Valid questionnaire_data with sections array');
+        return true;
+      }
+      
+      setErrorMessage('Invalid questionnaire_data format: missing sections array');
+      return false;
+    }
+
+    // Enhanced validation - accept multiple formats
+    if (data.transition_plan_questionnaire) {
+      const questionnaire = data.transition_plan_questionnaire;
+      console.log('Found nested transition_plan_questionnaire structure');
+      
+      if (!questionnaire.metadata && !questionnaire.basic_assessment_sections && !questionnaire.sections) {
+        setErrorMessage('Invalid questionnaire format: nested structure missing required sections');
+        return false;
+      }
+      return true;
+    }
+
+    if (data.sections && Array.isArray(data.sections)) {
+      console.log('Found direct sections structure');
+      return true;
+    }
+
+    if (data.basic_assessment_sections) {
+      console.log('Found basic_assessment_sections structure');
+      const sections = data.basic_assessment_sections;
+      for (const sectionKey of Object.keys(sections)) {
+        const section = sections[sectionKey];
+        if (!section.questions || !Array.isArray(section.questions)) {
+          setErrorMessage(`Invalid questionnaire format: section ${sectionKey} missing questions array`);
+          return false;
+        }
+      }
+      return true;
+    }
+
+    // Look for any nested questionnaire structure
+    for (const key of Object.keys(data)) {
+      const value = data[key];
+      if (value && typeof value === 'object' && (value.sections || value.basic_assessment_sections)) {
+        console.log(`Found questionnaire data in nested key: ${key}`);
+        return true;
+      }
+    }
+
+    setErrorMessage(`Invalid questionnaire format: no recognized structure found. Available keys: ${Object.keys(data).join(', ')}`);
+    return false;
   };
 
   const handleUpload = async () => {
@@ -75,7 +119,7 @@ const AdminUploadPage = () => {
     setErrorMessage('');
 
     try {
-      console.log('🚀 Starting upload process - preserving original structure...');
+      console.log('Starting upload process...');
       
       // Read and parse the JSON file
       const fileContent = await new Promise<string>((resolve, reject) => {
@@ -85,43 +129,67 @@ const AdminUploadPage = () => {
         reader.readAsText(file);
       });
 
-      console.log('📄 File read successfully, parsing JSON...');
+      console.log('File read successfully, parsing JSON...');
 
       let questionnaireData;
       try {
         questionnaireData = JSON.parse(fileContent);
-        console.log('✅ JSON parsed successfully - will be saved as-is');
+        console.log('JSON parsed successfully, structure preview:', {
+          topLevelKeys: Object.keys(questionnaireData),
+          isArray: Array.isArray(questionnaireData),
+          fileSize: fileContent.length
+        });
       } catch (parseError) {
         console.error('JSON parse error:', parseError);
         throw new Error('Invalid JSON format');
       }
 
-      console.log('📤 Uploading original JSON structure to server...');
+      // Validate the structure
+      console.log('Validating questionnaire structure...');
+      if (!validateQuestionnaireStructure(questionnaireData)) {
+        setUploadStatus('error');
+        setIsUploading(false);
+        return;
+      }
 
-      // Upload using the utility function - NO TRANSFORMATIONS
+      // Transform the data if needed to extract from wrappers
+      let finalQuestionnaireData = questionnaireData;
+      
+      // Handle array wrapper
+      if (Array.isArray(questionnaireData) && questionnaireData.length > 0) {
+        finalQuestionnaireData = questionnaireData[0];
+        console.log('Extracted questionnaire from array wrapper');
+      }
+      
+      // Handle questionnaire_data wrapper
+      if (finalQuestionnaireData.questionnaire_data) {
+        finalQuestionnaireData = finalQuestionnaireData.questionnaire_data;
+        console.log('Extracted questionnaire from questionnaire_data wrapper');
+      }
+
+      console.log('Structure validation passed, uploading to server...');
+      console.log('Final questionnaire data keys:', Object.keys(finalQuestionnaireData));
+      console.log('Total questions:', finalQuestionnaireData.totalQuestions || 'unknown');
+
+      // Upload using the utility function
       const success = await uploadCredibilityQuestionnaire(
-        questionnaireData, // ORIGINAL structure
+        finalQuestionnaireData,
         version,
-        description || 'Questionnaire uploaded with original structure preserved'
+        description || finalQuestionnaireData.description || 'Credibility assessment questionnaire'
       );
 
       if (success) {
-        console.log('🎉 Upload successful! Original JSON structure preserved.');
+        console.log('Upload successful!');
         setUploadStatus('success');
-        
-        // Clear any remaining cache
-        localStorage.removeItem('questionnaire-cache');
-        sessionStorage.removeItem('questionnaire-cache');
-        
         toast({
           title: 'Upload Successful',
-          description: 'Questionnaire uploaded with original JSON structure preserved.',
+          description: `Questionnaire with ${finalQuestionnaireData.totalQuestions || 'multiple'} questions has been uploaded and is now active.`,
         });
       } else {
         throw new Error('Upload failed');
       }
     } catch (error) {
-      console.error('❌ Upload error:', error);
+      console.error('Upload error:', error);
       setUploadStatus('error');
       setErrorMessage(error instanceof Error ? error.message : 'Upload failed');
       toast({
@@ -140,15 +208,16 @@ const AdminUploadPage = () => {
         <div className="mb-8">
           <h1 className="text-3xl font-bold">Admin: Upload Questionnaire</h1>
           <p className="text-muted-foreground mt-2">
-            Upload the questionnaire JSON file - original structure will be preserved exactly as uploaded
+            Upload the credibility assessment questionnaire JSON file
           </p>
         </div>
 
-        {/* Original structure preservation notice */}
+        {/* Clean state notification */}
         <Alert className="mb-6">
-          <FileText className="h-4 w-4" />
+          <Trash2 className="h-4 w-4" />
           <AlertDescription>
-            <strong>Original Structure Mode:</strong> Your JSON will be saved exactly as uploaded without any transformations or modifications.
+            System has been reset. All previous questionnaires and assessment reports have been cleared. 
+            You can now upload a fresh questionnaire.
           </AlertDescription>
         </Alert>
 
@@ -159,11 +228,10 @@ const AdminUploadPage = () => {
               Upload Questionnaire File
             </CardTitle>
             <CardDescription>
-              Select a JSON file - it will be saved with its original structure preserved.
+              Select a JSON file containing the credibility questionnaire data
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
-            
             <div className="space-y-2">
               <Label htmlFor="file">Questionnaire JSON File</Label>
               <Input
@@ -179,18 +247,6 @@ const AdminUploadPage = () => {
                 </p>
               )}
             </div>
-
-            {jsonPreview && (
-              <div className="space-y-2">
-                <Label className="text-sm font-medium">JSON Preview:</Label>
-                <div className="p-3 bg-muted rounded-md text-sm font-mono max-h-48 overflow-y-auto">
-                  <pre>{jsonPreview}</pre>
-                </div>
-                <div className="text-xs text-green-600">
-                  ✓ Valid JSON - structure will be preserved exactly as shown
-                </div>
-              </div>
-            )}
 
             <div className="space-y-2">
               <Label htmlFor="version">Version</Label>
@@ -225,7 +281,7 @@ const AdminUploadPage = () => {
               <Alert>
                 <CheckCircle className="h-4 w-4" />
                 <AlertDescription>
-                  Questionnaire uploaded successfully with original structure preserved!
+                  Questionnaire uploaded successfully and is now active!
                 </AlertDescription>
               </Alert>
             )}
@@ -235,20 +291,21 @@ const AdminUploadPage = () => {
               disabled={!file || isUploading}
               className="w-full"
             >
-              {isUploading ? 'Uploading Original Structure...' : 'Upload Questionnaire'}
+              {isUploading ? 'Uploading...' : 'Upload Questionnaire'}
             </Button>
           </CardContent>
         </Card>
 
         <div className="mt-8 p-4 bg-muted rounded-lg">
-          <h3 className="font-semibold mb-2">Original Structure Mode:</h3>
+          <h3 className="font-semibold mb-2">Supported Formats:</h3>
           <ul className="text-sm text-muted-foreground space-y-1">
-            <li>• ✅ No transformations applied to your JSON</li>
-            <li>• ✅ Original structure preserved exactly</li>
-            <li>• ✅ No automatic field additions or modifications</li>
-            <li>• ✅ What you upload is what gets saved</li>
-            <li>• ✅ Immediate activation after upload</li>
-            <li>• 🔍 Check browser console for upload logs</li>
+            <li>• <strong>Format 1:</strong> {"[{ questionnaire_data: { sections: [...] } }]"}</li>
+            <li>• <strong>Format 2:</strong> {"{ questionnaire_data: { sections: [...] } }"}</li>
+            <li>• <strong>Format 3:</strong> {"{ transition_plan_questionnaire: { basic_assessment_sections: {...} } }"}</li>
+            <li>• <strong>Format 4:</strong> {"{ sections: [...] }"}</li>
+            <li>• <strong>Format 5:</strong> {"{ basic_assessment_sections: {...} }"}</li>
+            <li>• The system will automatically detect and transform your format</li>
+            <li>• Check browser console for detailed validation logs</li>
           </ul>
         </div>
       </div>

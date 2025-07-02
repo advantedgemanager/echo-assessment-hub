@@ -1,3 +1,4 @@
+
 import { useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
@@ -30,7 +31,6 @@ interface QuestionnaireData {
   sections?: Array<{
     questions?: Array<any>;
   }>;
-  totalQuestions?: number;
 }
 
 export const useChunkedAssessment = () => {
@@ -50,56 +50,33 @@ export const useChunkedAssessment = () => {
 
   const getQuestionnaireInfo = async () => {
     try {
-      console.log('🔍 Fetching FRESH questionnaire info (no cache)...');
-      
-      // Query only existing columns from questionnaire_metadata table
       const { data, error } = await supabase
         .from('questionnaire_metadata')
-        .select('questionnaire_data, version, uploaded_at')
+        .select('questionnaire_data')
         .eq('is_active', true)
-        .order('uploaded_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+        .single();
 
-      if (error) {
-        console.error('Error fetching questionnaire from DB:', error);
-        console.warn('Using fallback count due to DB error');
-        return 95;
+      if (error || !data) {
+        console.warn('No active questionnaire found, using default count');
+        return 95; // fallback default
       }
-
-      if (!data) {
-        console.warn('No active questionnaire found in DB, using default count');
-        return 95;
-      }
-
-      console.log(`📋 Found questionnaire v${data.version} uploaded at ${data.uploaded_at}`);
 
       const questionnaireData = data.questionnaire_data as QuestionnaireData;
       let totalQuestions = 0;
 
-      // Check if we have totalQuestions directly in the data
-      if (questionnaireData?.totalQuestions && typeof questionnaireData.totalQuestions === 'number') {
-        totalQuestions = questionnaireData.totalQuestions;
-        console.log(`✅ Using totalQuestions from questionnaire data: ${totalQuestions}`);
-      } else if (questionnaireData?.sections && Array.isArray(questionnaireData.sections)) {
-        // Count questions from sections
+      if (questionnaireData?.sections && Array.isArray(questionnaireData.sections)) {
         questionnaireData.sections.forEach((section: any) => {
           if (section.questions && Array.isArray(section.questions)) {
             totalQuestions += section.questions.length;
           }
         });
-        console.log(`✅ Counted questions from sections: ${totalQuestions}`);
-      } else {
-        console.warn('No valid questionnaire structure found, using fallback');
-        totalQuestions = 95;
       }
 
-      console.log(`📊 Final question count: ${totalQuestions}`);
-      return totalQuestions || 95;
-      
+      console.log(`Found questionnaire with ${totalQuestions} questions`);
+      return totalQuestions || 95; // fallback to 95 if count is 0
     } catch (error) {
       console.error('Error fetching questionnaire info:', error);
-      return 95;
+      return 95; // fallback default
     }
   };
 
@@ -107,7 +84,7 @@ export const useChunkedAssessment = () => {
     let timeoutId: NodeJS.Timeout;
     
     try {
-      // Get the actual number of questions from the active questionnaire (always fresh)
+      // Get the actual number of questions from the active questionnaire
       const totalQuestions = await getQuestionnaireInfo();
 
       setAssessmentState({
@@ -122,7 +99,7 @@ export const useChunkedAssessment = () => {
         results: null
       });
 
-      console.log(`🚀 Processing assessment for document ${documentId} with ${totalQuestions} questions (fresh data)`);
+      console.log(`Processing assessment for document ${documentId} with ${totalQuestions} questions`);
       
       setAssessmentState(prev => ({
         ...prev,
@@ -142,11 +119,7 @@ export const useChunkedAssessment = () => {
       }, 3 * 60 * 1000); // 3 minutes
 
       const { data, error } = await supabase.functions.invoke('assess-document', {
-        body: { 
-          documentId, 
-          userId,
-          forceRefresh: Date.now() // Add cache-busting parameter
-        }
+        body: { documentId, userId }
       });
 
       // Clear timeout on success
@@ -168,7 +141,7 @@ export const useChunkedAssessment = () => {
         throw new Error(data?.error || 'Assessment failed');
       }
 
-      console.log('✅ Assessment response:', data);
+      console.log('Assessment response:', data);
 
       // Assessment completed successfully
       const results = {
