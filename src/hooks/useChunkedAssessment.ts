@@ -1,4 +1,3 @@
-
 import { useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
@@ -53,7 +52,7 @@ export const useChunkedAssessment = () => {
     try {
       console.log('🔍 Fetching FRESH questionnaire info (no cache)...');
       
-      // Force fresh query with explicit cache control - removed updated_at column
+      // Query only existing columns from questionnaire_metadata table
       const { data, error } = await supabase
         .from('questionnaire_metadata')
         .select('questionnaire_data, version, uploaded_at')
