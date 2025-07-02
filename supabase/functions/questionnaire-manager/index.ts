@@ -1,4 +1,3 @@
-
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -22,7 +21,7 @@ serve(async (req) => {
     });
     
     const { action, questionnaire_data, version, description } = requestBody;
-    console.log(`🚀 Questionnaire manager v5.0 - Action: ${action}`);
+    console.log(`🚀 Questionnaire manager v5.1 - Action: ${action} - Timestamp: ${new Date().toISOString()}`);
 
     // Initialize Supabase client
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
@@ -30,7 +29,7 @@ serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     if (action === 'upload') {
-      console.log('=== Questionnaire Upload v5.0 ===');
+      console.log('=== Questionnaire Upload v5.1 ===');
       
       try {
         if (!questionnaire_data) {
@@ -41,7 +40,7 @@ serve(async (req) => {
         console.log('Available top-level keys:', Object.keys(questionnaire_data));
 
         let transformedQuestionnaire;
-        let finalVersion = version || '5.0';
+        let finalVersion = version || '5.1';
         let totalQuestions = 0;
 
         // Handle nested transition_plan_questionnaire structure
@@ -148,7 +147,7 @@ serve(async (req) => {
           throw new Error('No questions found in questionnaire sections');
         }
 
-        // Enhanced questionnaire structure with metadata
+        // Enhanced questionnaire structure with metadata and cache-busting timestamp
         const enhancedQuestionnaire = {
           version: finalVersion,
           title: transformedQuestionnaire.title,
@@ -156,27 +155,31 @@ serve(async (req) => {
           totalQuestions: totalQuestions,
           sections: transformedQuestionnaire.sections,
           uploadedAt: new Date().toISOString(),
+          lastModified: Date.now(), // Cache-busting timestamp
           enhanced: true
         };
 
         const fileName = `questionnaire_v${finalVersion}.json`;
         const filePath = `/questionnaires/v${finalVersion}`;
         
-        console.log(`💾 Saving questionnaire: ${fileName} (${totalQuestions} questions)`);
+        console.log(`💾 Saving questionnaire: ${fileName} (${totalQuestions} questions) - Fresh at ${enhancedQuestionnaire.lastModified}`);
 
-        // Deactivate existing questionnaires
+        // Deactivate existing questionnaires with explicit timestamp logging
         console.log('🔄 Deactivating existing questionnaires...');
         const { error: deactivateError } = await supabase
           .from('questionnaire_metadata')
-          .update({ is_active: false })
+          .update({ 
+            is_active: false,
+            updated_at: new Date().toISOString() // Force timestamp update
+          })
           .eq('is_active', true);
 
         if (deactivateError) {
           console.warn('⚠️ Warning: Could not deactivate existing questionnaires:', deactivateError);
         }
 
-        // Insert the new questionnaire
-        console.log('📥 Inserting new questionnaire...');
+        // Insert the new questionnaire with explicit timestamps
+        console.log('📥 Inserting new questionnaire with fresh timestamp...');
         const { data: insertData, error: insertError } = await supabase
           .from('questionnaire_metadata')
           .insert({
@@ -185,7 +188,9 @@ serve(async (req) => {
             version: finalVersion,
             description: enhancedQuestionnaire.description,
             questionnaire_data: enhancedQuestionnaire,
-            is_active: true
+            is_active: true,
+            uploaded_at: new Date().toISOString(),
+            updated_at: new Date().toISOString() // Explicit update timestamp
           })
           .select()
           .single();
@@ -195,12 +200,13 @@ serve(async (req) => {
           throw new Error(`Failed to save questionnaire: ${insertError.message}`);
         }
 
-        console.log('🎉 Questionnaire uploaded successfully!');
+        console.log('🎉 Questionnaire uploaded successfully with fresh data!');
         console.log(`   - ID: ${insertData.id}`);
         console.log(`   - Version: ${finalVersion}`);
         console.log(`   - Questions: ${totalQuestions}`);
         console.log(`   - Sections: ${transformedQuestionnaire.sections.length}`);
         console.log(`   - Active: ${insertData.is_active}`);
+        console.log(`   - Cache-busting timestamp: ${enhancedQuestionnaire.lastModified}`);
 
         return new Response(JSON.stringify({ 
           success: true, 
@@ -209,6 +215,7 @@ serve(async (req) => {
           sections_count: transformedQuestionnaire.sections.length,
           total_questions: totalQuestions,
           is_active: insertData.is_active,
+          cache_buster: enhancedQuestionnaire.lastModified,
           message: `Questionnaire with ${totalQuestions} questions uploaded and activated successfully`
         }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -237,14 +244,17 @@ serve(async (req) => {
     }
 
     if (action === 'retrieve') {
-      console.log('=== Questionnaire Retrieval v5.0 ===');
+      console.log('=== Questionnaire Retrieval v5.1 - FRESH QUERY ===');
       
       try {
+        // Force fresh query with explicit ordering and no cache
+        console.log('🔍 Executing FRESH database query for active questionnaire...');
         const { data: activeQuestionnaire, error: dbError } = await supabase
           .from('questionnaire_metadata')
           .select('*')
           .eq('is_active', true)
           .order('uploaded_at', { ascending: false })
+          .order('updated_at', { ascending: false })
           .limit(1)
           .maybeSingle();
 
@@ -255,21 +265,34 @@ serve(async (req) => {
 
         if (activeQuestionnaire) {
           const questionnaireData = activeQuestionnaire.questionnaire_data;
-          console.log(`✅ Found active questionnaire: version ${activeQuestionnaire.version}`);
+          const cacheBuster = questionnaireData?.lastModified || Date.now();
+          
+          console.log(`✅ Found FRESH active questionnaire: version ${activeQuestionnaire.version}`);
           console.log(`📊 Details: ${questionnaireData?.sections?.length || 0} sections, ${questionnaireData?.totalQuestions || 'unknown'} questions`);
+          console.log(`🕒 Uploaded: ${activeQuestionnaire.uploaded_at}`);
+          console.log(`🔄 Cache-buster: ${cacheBuster}`);
           
           return new Response(JSON.stringify({
             questionnaire: questionnaireData,
             metadata: {
               version: activeQuestionnaire.version,
               uploaded_at: activeQuestionnaire.uploaded_at,
+              updated_at: activeQuestionnaire.updated_at,
               description: activeQuestionnaire.description,
               totalQuestions: questionnaireData?.totalQuestions,
               enhanced: questionnaireData?.enhanced,
-              is_active: activeQuestionnaire.is_active
+              is_active: activeQuestionnaire.is_active,
+              cache_buster: cacheBuster,
+              query_timestamp: new Date().toISOString()
             }
           }), {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            headers: { 
+              ...corsHeaders, 
+              'Content-Type': 'application/json',
+              'Cache-Control': 'no-cache, no-store, must-revalidate',
+              'Pragma': 'no-cache',
+              'Expires': '0'
+            },
           });
         }
 
@@ -277,11 +300,12 @@ serve(async (req) => {
         
         // Fallback questionnaire
         const fallbackQuestionnaire = {
-          version: "5.0",
+          version: "5.1",
           title: "Fallback Transition Plan Assessment",
           description: "Basic fallback questionnaire",
           totalQuestions: 4,
           enhanced: true,
+          lastModified: Date.now(),
           sections: [
             {
               id: "basic_assessment",
@@ -324,15 +348,23 @@ serve(async (req) => {
         return new Response(JSON.stringify({
           questionnaire: fallbackQuestionnaire,
           metadata: {
-            version: '5.0',
+            version: '5.1',
             uploaded_at: new Date().toISOString(),
             description: 'Fallback questionnaire',
             totalQuestions: 4,
             enhanced: true,
-            is_active: false
+            is_active: false,
+            cache_buster: Date.now(),
+            is_fallback: true
           }
         }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          headers: { 
+            ...corsHeaders, 
+            'Content-Type': 'application/json',
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0'
+          },
         });
         
       } catch (retrieveError) {
@@ -353,7 +385,7 @@ serve(async (req) => {
     );
 
   } catch (error) {
-    console.error('❌ Error in questionnaire-manager v5.0:', error);
+    console.error('❌ Error in questionnaire-manager v5.1:', error);
     return new Response(
       JSON.stringify({ 
         error: error.message,

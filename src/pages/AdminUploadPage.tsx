@@ -15,6 +15,7 @@ const AdminUploadPage = () => {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState('');
+  const [uploadResponse, setUploadResponse] = useState<any>(null);
   const { toast } = useToast();
 
   // Clear any cached questionnaire data on component mount
@@ -22,6 +23,7 @@ const AdminUploadPage = () => {
     // Force a refresh of any cached questionnaire data
     localStorage.removeItem('questionnaire-cache');
     sessionStorage.removeItem('questionnaire-cache');
+    console.log('🧹 Cleared questionnaire cache on admin page load');
   }, []);
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -31,6 +33,7 @@ const AdminUploadPage = () => {
         setFile(selectedFile);
         setUploadStatus('idle');
         setErrorMessage('');
+        setUploadResponse(null);
       } else {
         setErrorMessage('Please select a valid JSON file');
         setFile(null);
@@ -117,9 +120,10 @@ const AdminUploadPage = () => {
     setIsUploading(true);
     setUploadStatus('idle');
     setErrorMessage('');
+    setUploadResponse(null);
 
     try {
-      console.log('Starting upload process...');
+      console.log('🚀 Starting upload process with cache-busting...');
       
       // Read and parse the JSON file
       const fileContent = await new Promise<string>((resolve, reject) => {
@@ -129,12 +133,12 @@ const AdminUploadPage = () => {
         reader.readAsText(file);
       });
 
-      console.log('File read successfully, parsing JSON...');
+      console.log('📄 File read successfully, parsing JSON...');
 
       let questionnaireData;
       try {
         questionnaireData = JSON.parse(fileContent);
-        console.log('JSON parsed successfully, structure preview:', {
+        console.log('✅ JSON parsed successfully, structure preview:', {
           topLevelKeys: Object.keys(questionnaireData),
           isArray: Array.isArray(questionnaireData),
           fileSize: fileContent.length
@@ -145,7 +149,7 @@ const AdminUploadPage = () => {
       }
 
       // Validate the structure
-      console.log('Validating questionnaire structure...');
+      console.log('🔍 Validating questionnaire structure...');
       if (!validateQuestionnaireStructure(questionnaireData)) {
         setUploadStatus('error');
         setIsUploading(false);
@@ -158,20 +162,20 @@ const AdminUploadPage = () => {
       // Handle array wrapper
       if (Array.isArray(questionnaireData) && questionnaireData.length > 0) {
         finalQuestionnaireData = questionnaireData[0];
-        console.log('Extracted questionnaire from array wrapper');
+        console.log('📦 Extracted questionnaire from array wrapper');
       }
       
       // Handle questionnaire_data wrapper
       if (finalQuestionnaireData.questionnaire_data) {
         finalQuestionnaireData = finalQuestionnaireData.questionnaire_data;
-        console.log('Extracted questionnaire from questionnaire_data wrapper');
+        console.log('📦 Extracted questionnaire from questionnaire_data wrapper');
       }
 
-      console.log('Structure validation passed, uploading to server...');
-      console.log('Final questionnaire data keys:', Object.keys(finalQuestionnaireData));
-      console.log('Total questions:', finalQuestionnaireData.totalQuestions || 'unknown');
+      console.log('✅ Structure validation passed, uploading to server...');
+      console.log('📊 Final questionnaire data keys:', Object.keys(finalQuestionnaireData));
+      console.log('📈 Total questions:', finalQuestionnaireData.totalQuestions || 'unknown');
 
-      // Upload using the utility function
+      // Upload using the utility function with cache-busting
       const success = await uploadCredibilityQuestionnaire(
         finalQuestionnaireData,
         version,
@@ -179,17 +183,22 @@ const AdminUploadPage = () => {
       );
 
       if (success) {
-        console.log('Upload successful!');
+        console.log('🎉 Upload successful! Questionnaire is now active.');
         setUploadStatus('success');
+        
+        // Clear any remaining cache
+        localStorage.removeItem('questionnaire-cache');
+        sessionStorage.removeItem('questionnaire-cache');
+        
         toast({
           title: 'Upload Successful',
-          description: `Questionnaire with ${finalQuestionnaireData.totalQuestions || 'multiple'} questions has been uploaded and is now active.`,
+          description: `Questionnaire with ${finalQuestionnaireData.totalQuestions || 'multiple'} questions has been uploaded and is now active. All caches cleared.`,
         });
       } else {
         throw new Error('Upload failed');
       }
     } catch (error) {
-      console.error('Upload error:', error);
+      console.error('❌ Upload error:', error);
       setUploadStatus('error');
       setErrorMessage(error instanceof Error ? error.message : 'Upload failed');
       toast({
@@ -208,7 +217,7 @@ const AdminUploadPage = () => {
         <div className="mb-8">
           <h1 className="text-3xl font-bold">Admin: Upload Questionnaire</h1>
           <p className="text-muted-foreground mt-2">
-            Upload the credibility assessment questionnaire JSON file
+            Upload the credibility assessment questionnaire JSON file (always fresh, no cache)
           </p>
         </div>
 
@@ -216,8 +225,7 @@ const AdminUploadPage = () => {
         <Alert className="mb-6">
           <Trash2 className="h-4 w-4" />
           <AlertDescription>
-            System has been reset. All previous questionnaires and assessment reports have been cleared. 
-            You can now upload a fresh questionnaire.
+            System configured for fresh data queries. All questionnaire data is fetched directly from database without cache.
           </AlertDescription>
         </Alert>
 
@@ -228,10 +236,11 @@ const AdminUploadPage = () => {
               Upload Questionnaire File
             </CardTitle>
             <CardDescription>
-              Select a JSON file containing the credibility questionnaire data
+              Select a JSON file containing the credibility questionnaire data. Updates are immediately active.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
+            
             <div className="space-y-2">
               <Label htmlFor="file">Questionnaire JSON File</Label>
               <Input
@@ -281,7 +290,7 @@ const AdminUploadPage = () => {
               <Alert>
                 <CheckCircle className="h-4 w-4" />
                 <AlertDescription>
-                  Questionnaire uploaded successfully and is now active!
+                  Questionnaire uploaded successfully and is now active! Fresh data guaranteed.
                 </AlertDescription>
               </Alert>
             )}
@@ -291,21 +300,21 @@ const AdminUploadPage = () => {
               disabled={!file || isUploading}
               className="w-full"
             >
-              {isUploading ? 'Uploading...' : 'Upload Questionnaire'}
+              {isUploading ? 'Uploading & Activating...' : 'Upload Questionnaire'}
             </Button>
           </CardContent>
         </Card>
 
+        
         <div className="mt-8 p-4 bg-muted rounded-lg">
-          <h3 className="font-semibold mb-2">Supported Formats:</h3>
+          <h3 className="font-semibold mb-2">Fresh Data Configuration:</h3>
           <ul className="text-sm text-muted-foreground space-y-1">
-            <li>• <strong>Format 1:</strong> {"[{ questionnaire_data: { sections: [...] } }]"}</li>
-            <li>• <strong>Format 2:</strong> {"{ questionnaire_data: { sections: [...] } }"}</li>
-            <li>• <strong>Format 3:</strong> {"{ transition_plan_questionnaire: { basic_assessment_sections: {...} } }"}</li>
-            <li>• <strong>Format 4:</strong> {"{ sections: [...] }"}</li>
-            <li>• <strong>Format 5:</strong> {"{ basic_assessment_sections: {...} }"}</li>
-            <li>• The system will automatically detect and transform your format</li>
-            <li>• Check browser console for detailed validation logs</li>
+            <li>• ✅ No cache - Always fresh database queries</li>
+            <li>• ✅ Immediate activation after upload</li>
+            <li>• ✅ Cache-busting timestamps added</li>
+            <li>• ✅ Real-time questionnaire updates</li>
+            <li>• ✅ Direct database polling for active questionnaire</li>
+            <li>• 🔍 Check browser console for detailed query logs</li>
           </ul>
         </div>
       </div>

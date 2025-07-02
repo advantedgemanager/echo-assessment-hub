@@ -50,33 +50,58 @@ export const useChunkedAssessment = () => {
 
   const getQuestionnaireInfo = async () => {
     try {
+      console.log('🔍 Fetching FRESH questionnaire info (no cache)...');
+      
+      // Force fresh query with explicit cache control
       const { data, error } = await supabase
         .from('questionnaire_metadata')
-        .select('questionnaire_data')
+        .select('questionnaire_data, version, uploaded_at, updated_at')
         .eq('is_active', true)
-        .single();
+        .order('uploaded_at', { ascending: false })
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
-      if (error || !data) {
-        console.warn('No active questionnaire found, using default count');
-        return 95; // fallback default
+      if (error) {
+        console.error('Error fetching questionnaire from DB:', error);
+        console.warn('Using fallback count due to DB error');
+        return 95;
       }
+
+      if (!data) {
+        console.warn('No active questionnaire found in DB, using default count');
+        return 95;
+      }
+
+      console.log(`📋 Found questionnaire v${data.version} uploaded at ${data.uploaded_at}`);
+      console.log(`🔄 Last updated: ${data.updated_at}`);
 
       const questionnaireData = data.questionnaire_data as QuestionnaireData;
       let totalQuestions = 0;
 
-      if (questionnaireData?.sections && Array.isArray(questionnaireData.sections)) {
+      // Check if we have totalQuestions directly in the data
+      if (questionnaireData?.totalQuestions && typeof questionnaireData.totalQuestions === 'number') {
+        totalQuestions = questionnaireData.totalQuestions;
+        console.log(`✅ Using totalQuestions from questionnaire data: ${totalQuestions}`);
+      } else if (questionnaireData?.sections && Array.isArray(questionnaireData.sections)) {
+        // Count questions from sections
         questionnaireData.sections.forEach((section: any) => {
           if (section.questions && Array.isArray(section.questions)) {
             totalQuestions += section.questions.length;
           }
         });
+        console.log(`✅ Counted questions from sections: ${totalQuestions}`);
+      } else {
+        console.warn('No valid questionnaire structure found, using fallback');
+        totalQuestions = 95;
       }
 
-      console.log(`Found questionnaire with ${totalQuestions} questions`);
-      return totalQuestions || 95; // fallback to 95 if count is 0
+      console.log(`📊 Final question count: ${totalQuestions}`);
+      return totalQuestions || 95;
+      
     } catch (error) {
       console.error('Error fetching questionnaire info:', error);
-      return 95; // fallback default
+      return 95;
     }
   };
 
@@ -84,7 +109,7 @@ export const useChunkedAssessment = () => {
     let timeoutId: NodeJS.Timeout;
     
     try {
-      // Get the actual number of questions from the active questionnaire
+      // Get the actual number of questions from the active questionnaire (always fresh)
       const totalQuestions = await getQuestionnaireInfo();
 
       setAssessmentState({
@@ -99,7 +124,7 @@ export const useChunkedAssessment = () => {
         results: null
       });
 
-      console.log(`Processing assessment for document ${documentId} with ${totalQuestions} questions`);
+      console.log(`🚀 Processing assessment for document ${documentId} with ${totalQuestions} questions (fresh data)`);
       
       setAssessmentState(prev => ({
         ...prev,
@@ -119,7 +144,11 @@ export const useChunkedAssessment = () => {
       }, 3 * 60 * 1000); // 3 minutes
 
       const { data, error } = await supabase.functions.invoke('assess-document', {
-        body: { documentId, userId }
+        body: { 
+          documentId, 
+          userId,
+          forceRefresh: Date.now() // Add cache-busting parameter
+        }
       });
 
       // Clear timeout on success
@@ -141,7 +170,7 @@ export const useChunkedAssessment = () => {
         throw new Error(data?.error || 'Assessment failed');
       }
 
-      console.log('Assessment response:', data);
+      console.log('✅ Assessment response:', data);
 
       // Assessment completed successfully
       const results = {

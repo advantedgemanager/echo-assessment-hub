@@ -1,3 +1,4 @@
+
 export const getDocument = async (supabaseClient: any, documentId: string, userId: string) => {
   const { data: document, error: docError } = await supabaseClient
     .from('uploaded_documents')
@@ -18,14 +19,18 @@ export const getDocument = async (supabaseClient: any, documentId: string, userI
 };
 
 export const getQuestionnaire = async (supabaseClient: any) => {
-  console.log('Fetching embedded questionnaire...');
+  console.log('🔍 Fetching FRESH embedded questionnaire (no cache)...');
   
   try {
     const questionnaireResponse = await supabaseClient.functions.invoke('questionnaire-manager', {
-      body: { action: 'retrieve' }
+      body: { 
+        action: 'retrieve',
+        forceRefresh: Date.now(), // Cache-busting parameter
+        timestamp: new Date().toISOString()
+      }
     });
 
-    console.log('Questionnaire response received');
+    console.log('📥 Questionnaire response received');
 
     if (questionnaireResponse.error) {
       console.error('Questionnaire function error:', questionnaireResponse.error);
@@ -44,7 +49,14 @@ export const getQuestionnaire = async (supabaseClient: any) => {
       throw new Error('Invalid questionnaire structure received');
     }
 
-    console.log(`Questionnaire loaded with ${data.questionnaire.sections.length} sections`);
+    const cacheBuster = data.metadata?.cache_buster || Date.now();
+    const queryTimestamp = data.metadata?.query_timestamp;
+    
+    console.log(`✅ Questionnaire loaded with ${data.questionnaire.sections.length} sections`);
+    console.log(`🔄 Cache-buster: ${cacheBuster}`);
+    console.log(`🕒 Query timestamp: ${queryTimestamp}`);
+    console.log(`📊 Total questions: ${data.questionnaire.totalQuestions || 'unknown'}`);
+    
     return data;
 
   } catch (error) {
