@@ -31,6 +31,7 @@ interface QuestionnaireData {
   sections?: Array<{
     questions?: Array<any>;
   }>;
+  totalQuestions?: number;
 }
 
 export const useChunkedAssessment = () => {
@@ -52,13 +53,12 @@ export const useChunkedAssessment = () => {
     try {
       console.log('🔍 Fetching FRESH questionnaire info (no cache)...');
       
-      // Force fresh query with explicit cache control
+      // Force fresh query with explicit cache control - removed updated_at column
       const { data, error } = await supabase
         .from('questionnaire_metadata')
-        .select('questionnaire_data, version, uploaded_at, updated_at')
+        .select('questionnaire_data, version, uploaded_at')
         .eq('is_active', true)
         .order('uploaded_at', { ascending: false })
-        .order('updated_at', { ascending: false })
         .limit(1)
         .maybeSingle();
 
@@ -74,7 +74,6 @@ export const useChunkedAssessment = () => {
       }
 
       console.log(`📋 Found questionnaire v${data.version} uploaded at ${data.uploaded_at}`);
-      console.log(`🔄 Last updated: ${data.updated_at}`);
 
       const questionnaireData = data.questionnaire_data as QuestionnaireData;
       let totalQuestions = 0;
