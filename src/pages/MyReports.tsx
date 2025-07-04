@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -11,6 +10,7 @@ import { getOverallRating } from '@/components/assessment/utils';
 import { usePdfGenerator } from '@/components/assessment/usePdfGenerator';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
+import { AssessmentData } from '@/components/assessment/types';
 
 const MyReports = () => {
   const { user, signOut, loading } = useAuth();
@@ -40,7 +40,8 @@ const MyReports = () => {
 
       if (error) throw error;
 
-      const assessmentData = detailedReport.assessment_data;
+      // Type cast the assessment_data to our known structure
+      const assessmentData = detailedReport.assessment_data as unknown as AssessmentData;
       
       // Extract question results and section stats from assessment data
       const questionResults: any[] = [];
