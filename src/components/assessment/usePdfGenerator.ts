@@ -21,6 +21,22 @@ export const usePdfGenerator = () => {
     return report;
   };
 
+  // Helper function to get color based on response
+  const getResponseColor = (response: string): [number, number, number] => {
+    switch (response) {
+      case 'Yes':
+      case 'Sì':
+        return [34, 197, 94]; // Green
+      case 'No':
+        return [239, 68, 68]; // Red
+      case 'N/A':
+      case 'NA':
+        return [107, 114, 128]; // Gray
+      default:
+        return [0, 0, 0]; // Black
+    }
+  };
+
   const generatePdfReport = async (
     credibilityScore: number,
     totalScore: number,
@@ -94,7 +110,7 @@ export const usePdfGenerator = () => {
       doc.text(`Punteggio: ${totalScore.toFixed(1)} / ${maxPossibleScore} punti`, margin, currentY);
       currentY += 20;
 
-      // Section Statistics
+      // Section Statistics with colored counts
       checkNewPage(30);
       doc.setFontSize(16);
       doc.setFont('helvetica', 'bold');
@@ -110,7 +126,21 @@ export const usePdfGenerator = () => {
         currentY += 8;
         
         doc.setFont('helvetica', 'normal');
-        doc.text(`Sì: ${stat.yesCount} (${stat.yesPercentage}%) | No: ${stat.noCount} | N/A: ${stat.naCount}`, margin + 5, currentY);
+        
+        // Yes count in green
+        doc.setTextColor(...getResponseColor('Yes'));
+        doc.text(`Sì: ${stat.yesCount} (${stat.yesPercentage}%)`, margin + 5, currentY);
+        
+        // No count in red
+        doc.setTextColor(...getResponseColor('No'));
+        doc.text(`No: ${stat.noCount}`, margin + 70, currentY);
+        
+        // N/A count in gray
+        doc.setTextColor(...getResponseColor('N/A'));
+        doc.text(`N/A: ${stat.naCount}`, margin + 110, currentY);
+        
+        // Reset color to black
+        doc.setTextColor(0, 0, 0);
         currentY += 8;
         doc.text(`Totale domande: ${stat.totalQuestions}`, margin + 5, currentY);
         currentY += 12;
@@ -120,14 +150,16 @@ export const usePdfGenerator = () => {
       checkNewPage(30);
       doc.setFontSize(16);
       doc.setFont('helvetica', 'bold');
+      doc.setTextColor(0, 0, 0);
       doc.text('Risultati Dettagliati', margin, currentY);
       currentY += 15;
 
       questionResults.forEach((question, index) => {
-        checkNewPage(30);
+        checkNewPage(40);
         
         doc.setFontSize(10);
         doc.setFont('helvetica', 'bold');
+        doc.setTextColor(0, 0, 0);
         doc.text(`${index + 1}. ID: ${question.questionId}`, margin, currentY);
         currentY += 6;
         
@@ -145,7 +177,13 @@ export const usePdfGenerator = () => {
         );
         currentY += questionHeight + 2;
         
-        doc.text(`Risposta: ${question.response} | Punteggio: ${question.score}/${question.weight}`, margin, currentY);
+        // Response with color
+        doc.setTextColor(...getResponseColor(question.response));
+        doc.text(`Risposta: ${question.response}`, margin, currentY);
+        
+        // Score in black
+        doc.setTextColor(0, 0, 0);
+        doc.text(`Punteggio: ${question.score}/${question.weight}`, margin + 80, currentY);
         currentY += 10;
       });
 
@@ -153,6 +191,7 @@ export const usePdfGenerator = () => {
       checkNewPage(20);
       doc.setFontSize(10);
       doc.setFont('helvetica', 'italic');
+      doc.setTextColor(0, 0, 0);
       doc.text('Report generato automaticamente dal sistema di valutazione AI', margin, currentY);
       currentY += 6;
       doc.text(`Documento contiene ${questionResults.length} domande analizzate su ${sectionStats.length} sezioni`, margin, currentY);
