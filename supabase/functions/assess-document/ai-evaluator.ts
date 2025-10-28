@@ -153,27 +153,48 @@ export const evaluateQuestionAgainstChunks = async (
   let hasNegativeEvidence = false;
   let confidenceScore = 0;
   
-  const maxChunksToProcess = Math.min(documentChunks.length, 4); // Ridotto per velocizzare
+  // Enhanced chunk selection with smart relevance scoring
+  const maxChunksToProcess = Math.min(documentChunks.length, 10); // Increased to 10 for better coverage
   
-  console.log(`🔍 Evaluating question ${question.id} against ${maxChunksToProcess} chunks`);
+  // Score chunks by relevance to this question
+  const scoredChunks = documentChunks.slice(0, 30).map((chunk, index) => {
+    const keywords = extractEnhancedTransitionKeywords(question.text);
+    let relevanceScore = 0;
+    const chunkLower = chunk.toLowerCase();
+    
+    // Score by keyword matches
+    keywords.forEach(keyword => {
+      const matches = (chunkLower.match(new RegExp(keyword.toLowerCase(), 'g')) || []).length;
+      relevanceScore += matches;
+    });
+    
+    return { chunk, index, relevanceScore };
+  });
+  
+  // Sort by relevance and select top chunks
+  scoredChunks.sort((a, b) => b.relevanceScore - a.relevanceScore);
+  const selectedChunks = scoredChunks.slice(0, maxChunksToProcess);
+  
+  console.log(`🔍 Evaluating question ${question.id} against ${maxChunksToProcess} chunks (selected from ${documentChunks.length})`);
   console.log(`Question: ${question.text.substring(0, 100)}...`);
+  console.log(`Top chunk relevance scores: ${selectedChunks.slice(0, 3).map(c => c.relevanceScore).join(', ')}`);
   
   // Aggiungi timeout specifico per questa domanda
   const questionStartTime = Date.now();
   const QUESTION_TIMEOUT = 3 * 60 * 1000; // 3 minuti per domanda
   
-  // Process chunks with enhanced strategy
-  for (let i = 0; i < maxChunksToProcess; i++) {
-    // Controlla timeout per domanda
+  // Process selected chunks with enhanced strategy
+  for (let i = 0; i < selectedChunks.length; i++) {
+    // Check timeout for question
     if (Date.now() - questionStartTime > QUESTION_TIMEOUT) {
       console.warn(`⏰ Question ${question.id} timeout after ${Math.round((Date.now() - questionStartTime) / 1000)}s`);
       break;
     }
     
-    const chunk = documentChunks[i];
+    const { chunk, index: chunkIndex, relevanceScore } = selectedChunks[i];
     const relevantContent = findRelevantContent(chunk, question.text);
     
-    console.log(`Processing chunk ${i + 1}/${maxChunksToProcess} for question ${question.id}`);
+    console.log(`Processing chunk ${i + 1}/${selectedChunks.length} (chunk #${chunkIndex}, relevance: ${relevanceScore}) for question ${question.id}`);
     console.log(`Relevant content length: ${relevantContent.length} chars`);
     
     if (i > 0) {
@@ -316,9 +337,9 @@ Think carefully - only answer "Yes" if the evidence is clear and specific.`;
           }
         }
         
-        // Early termination con soglia ridotta per velocizzare
-        if (hasPositiveEvidence && successfulCalls >= 1 && confidenceScore >= 3) {
-          console.log(`🎯 Early termination: Strong positive evidence found (confidence: ${confidenceScore})`);
+        // Early termination with higher threshold for better accuracy
+        if (hasPositiveEvidence && successfulCalls >= 3 && confidenceScore >= 9) {
+          console.log(`🎯 Early termination: Strong positive evidence found after ${successfulCalls} chunks (confidence: ${confidenceScore})`);
           break;
         }
         

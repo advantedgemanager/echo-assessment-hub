@@ -4,6 +4,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { createDocumentChunks } from './document-processor.ts';
 import { processAssessment } from './assessment-processor.ts';
+import { processBatchedAssessment } from './batched-assessment-processor.ts';
 import { 
   getDocument, 
   getQuestionnaire, 
@@ -31,15 +32,15 @@ serve(async (req) => {
   const startTime = Date.now();
   
   try {
-    console.log('=== Starting enhanced 265-question assessment v5.0 ===');
+    console.log('=== Starting batched assessment v6.0 ===');
     
     const supabaseClient = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
-    const { documentId, userId } = await req.json();
-    console.log(`Processing enhanced assessment for document: ${documentId}, user: ${userId}`);
+    const { documentId, userId, batchIndex = 0, batchSize = 20 } = await req.json();
+    console.log(`Processing batched assessment for document: ${documentId}, user: ${userId}, batch: ${batchIndex}, size: ${batchSize}`);
 
     if (!documentId || !userId) {
       throw new Error('Document ID and User ID are required');
@@ -170,8 +171,48 @@ serve(async (req) => {
 
     checkTimeout();
 
-    // Enhanced comprehensive assessment processing
-    console.log(`Starting enhanced AI assessment v5.0 for ${totalQuestions} questions...`);
+    // Check if this is a batched request or full assessment
+    if (batchIndex !== undefined && batchIndex >= 0) {
+      // Batched assessment processing
+      console.log(`Starting batched AI assessment v6.0 for batch ${batchIndex}...`);
+      const batchResults = await processBatchedAssessment(
+        questionnaireData,
+        chunksToProcess,
+        lovableApiKey,
+        checkTimeout,
+        documentWasTruncated,
+        batchIndex,
+        batchSize
+      );
+      console.log('Batched AI assessment completed successfully');
+      
+      const processingTime = Date.now() - startTime;
+      console.log(`=== Batch ${batchIndex + 1}/${batchResults.totalBatches} completed in ${processingTime}ms ===`);
+      
+      // Return batch results
+      return new Response(
+        JSON.stringify({
+          success: true,
+          isBatch: true,
+          batchIndex: batchResults.batchIndex,
+          totalBatches: batchResults.totalBatches,
+          questionsInBatch: batchResults.questionsInBatch,
+          totalQuestions: batchResults.totalQuestions,
+          batchResults: batchResults.batchResults,
+          completed: batchResults.completed,
+          processingTime,
+          chunksProcessed: chunksToProcess.length,
+          wasTruncated: documentWasTruncated,
+          version: '6.0-batched'
+        }),
+        {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
+    }
+    
+    // Full assessment processing (legacy support)
+    console.log(`Starting full AI assessment v6.0 for ${totalQuestions} questions...`);
     const assessmentResults = await processAssessment(
       questionnaireData,
       chunksToProcess,
@@ -179,7 +220,7 @@ serve(async (req) => {
       checkTimeout,
       documentWasTruncated
     );
-    console.log('Enhanced AI assessment completed successfully');
+    console.log('Full AI assessment completed successfully');
     console.log('Assessment summary:', {
       overallResult: assessmentResults.overallResult,
       credibilityScore: assessmentResults.credibilityScore,
@@ -192,7 +233,7 @@ serve(async (req) => {
     checkTimeout();
 
     // Enhanced assessment report storage
-    console.log('Saving enhanced assessment report...');
+    console.log('Saving full assessment report...');
     const reportData = await saveAssessmentReport(
       supabaseClient,
       userId,
@@ -209,12 +250,13 @@ serve(async (req) => {
     console.log('Document status updated');
 
     const processingTime = Date.now() - startTime;
-    console.log(`=== Enhanced 265-question assessment v5.0 completed successfully in ${processingTime}ms ===`);
+    console.log(`=== Full assessment v6.0 completed successfully in ${processingTime}ms ===`);
 
     // Enhanced response with comprehensive metadata
     return new Response(
       JSON.stringify({
         success: true,
+        isBatch: false,
         credibilityScore: assessmentResults.credibilityScore,
         totalScore: assessmentResults.totalScore,
         maxPossibleScore: assessmentResults.maxPossibleScore,
@@ -229,8 +271,8 @@ serve(async (req) => {
         overallResult: assessmentResults.overallResult,
         redFlagTriggered: assessmentResults.redFlagTriggered,
         reasoning: assessmentResults.reasoning,
-        version: '5.0',
-        textSource: 'frontend_extracted' // Indicate text was extracted by frontend
+        version: '6.0',
+        textSource: 'frontend_extracted'
       }),
       {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -239,31 +281,31 @@ serve(async (req) => {
 
   } catch (error: any) {
     const processingTime = Date.now() - startTime;
-    console.error('Error in enhanced assess-document v5.0:', error);
+    console.error('Error in assess-document v6.0:', error);
     console.error('Error stack:', error.stack);
     console.error(`Failed after ${processingTime}ms`);
     
-    // Enhanced error categorization and user feedback for comprehensive assessments
+    // Enhanced error categorization
     let errorMessage = error.message;
     let errorCode = 'PROCESSING_ERROR';
     
     if (error.message.includes('timeout') || processingTime > MAX_PROCESSING_TIME) {
-      errorMessage = 'Enhanced assessment timed out. The 265-question assessment requires significant processing time. Please try again or contact support.';
+      errorMessage = 'Assessment timed out. Please try again or contact support.';
       errorCode = 'TIMEOUT_ERROR';
     } else if (error.message.includes('Rate limit') || error.message.includes('429')) {
-      errorMessage = 'AI service is experiencing high demand during enhanced assessment. Please wait a few minutes and try again.';
+      errorMessage = 'AI service rate limit reached. Please wait a few minutes and try again.';
       errorCode = 'RATE_LIMIT_ERROR';
     } else if (error.message.includes('questionnaire') || error.message.includes('sections') || error.message.includes('No questions found')) {
-      errorMessage = 'There was an issue with the comprehensive questionnaire. Please ensure the 265-question questionnaire is properly uploaded and active.';
+      errorMessage = 'Issue with questionnaire. Please ensure it is properly uploaded and active.';
       errorCode = 'QUESTIONNAIRE_ERROR';
     } else if (error.message.includes('LOVABLE_API_KEY')) {
       errorMessage = 'AI service configuration error. Please contact support.';
       errorCode = 'CONFIG_ERROR';
     } else if (error.message.includes('document_text') || error.message.includes('text extraction')) {
-      errorMessage = 'Document text could not be extracted or is too short. Please ensure the document contains readable text and try uploading again.';
+      errorMessage = 'Document text extraction failed. Please ensure the document contains readable text.';
       errorCode = 'DOCUMENT_ERROR';
     } else if (error.message.includes('fetch') || error.message.includes('network')) {
-      errorMessage = 'Network error while connecting to AI service during enhanced assessment. Please check your connection and try again.';
+      errorMessage = 'Network error. Please check your connection and try again.';
       errorCode = 'NETWORK_ERROR';
     }
     
@@ -274,7 +316,7 @@ serve(async (req) => {
         processingTime,
         success: false,
         details: error.message,
-        version: '5.0'
+        version: '6.0'
       }),
       {
         status: 500,
