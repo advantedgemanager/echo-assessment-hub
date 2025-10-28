@@ -145,7 +145,7 @@ const extractEnhancedTransitionKeywords = (questionText: string): string[] => {
 export const evaluateQuestionAgainstChunks = async (
   question: any,
   documentChunks: string[],
-  mistralApiKey: string
+  lovableApiKey: string
 ): Promise<QuestionEvaluation> => {
   let bestResponse: 'Yes' | 'No' | 'Not enough information' = 'Not enough information';
   let successfulCalls = 0;
@@ -251,14 +251,14 @@ Respond with exactly one word: "Yes", "No", or "Not enough information"
 Think carefully - only answer "Yes" if the evidence is clear and specific.`;
 
         const apiCallPromise = async () => {
-          const response = await fetch('https://api.mistral.ai/v1/chat/completions', {
+          const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
             method: 'POST',
             headers: {
-              'Authorization': `Bearer ${mistralApiKey}`,
+              'Authorization': `Bearer ${lovableApiKey}`,
               'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-              model: 'mistral-small-2312',
+              model: 'google/gemini-2.5-flash',
               messages: [
                 { role: 'system', content: systemPrompt },
                 { role: 'user', content: userPrompt }

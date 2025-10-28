@@ -16,7 +16,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const mistralApiKey = Deno.env.get('MISTRAL_API_KEY');
+const lovableApiKey = Deno.env.get('LOVABLE_API_KEY');
 
 // Enhanced resource limits for comprehensive 265-question assessment
 const MAX_PROCESSING_TIME = 25 * 60 * 1000; // Increased to 25 minutes for 265 questions
@@ -45,8 +45,8 @@ serve(async (req) => {
       throw new Error('Document ID and User ID are required');
     }
 
-    if (!mistralApiKey) {
-      throw new Error('MISTRAL_API_KEY environment variable is not set');
+    if (!lovableApiKey) {
+      throw new Error('LOVABLE_API_KEY environment variable is not set');
     }
 
     // Enhanced timeout checking for longer processing
@@ -175,7 +175,7 @@ serve(async (req) => {
     const assessmentResults = await processAssessment(
       questionnaireData,
       chunksToProcess,
-      mistralApiKey,
+      lovableApiKey,
       checkTimeout,
       documentWasTruncated
     );
@@ -256,7 +256,7 @@ serve(async (req) => {
     } else if (error.message.includes('questionnaire') || error.message.includes('sections') || error.message.includes('No questions found')) {
       errorMessage = 'There was an issue with the comprehensive questionnaire. Please ensure the 265-question questionnaire is properly uploaded and active.';
       errorCode = 'QUESTIONNAIRE_ERROR';
-    } else if (error.message.includes('MISTRAL_API_KEY')) {
+    } else if (error.message.includes('LOVABLE_API_KEY')) {
       errorMessage = 'AI service configuration error. Please contact support.';
       errorCode = 'CONFIG_ERROR';
     } else if (error.message.includes('document_text') || error.message.includes('text extraction')) {
